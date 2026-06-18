@@ -25,6 +25,7 @@ export function createMagentoClient(site: SiteConfig, accessToken: string): Mage
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
+        "User-Agent": "FraudHoldSystem/1.0",
         Authorization: `Bearer ${accessToken}`,
         ...(init.headers ?? {})
       }
