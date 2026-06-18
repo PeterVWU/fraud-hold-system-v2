@@ -21,12 +21,13 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 
 ```bash
 npx wrangler secret put MAGENTO_MAIN_ACCESS_TOKEN
+npx wrangler secret put MAGENTO_MISTHUB_ACCESS_TOKEN
 npx wrangler secret put SLACK_BOT_TOKEN
 npx wrangler secret put SLACK_WEBHOOK_URL
 npx wrangler secret put MANUAL_RUN_TOKEN
 ```
 
-4. Update `MAGENTO_SITES_JSON` in `wrangler.jsonc` for each Magento site. Add one object per site with a unique `id`, `baseUrl`, `storeCode`, `accessTokenEnv`, optional `adminBaseUrl`, optional `paymentFingerprintPaths`, and optional `initialLookbackHours` for first-run backfills.
+4. Update `MAGENTO_SITES_JSON` in `wrangler.jsonc` for each Magento site. Add one object per site with a unique `id`, `baseUrl`, `storeCode`, `accessTokenEnv`, optional `adminBaseUrl`, optional `paymentFingerprintPaths`, and optional `scanIntervalMinutes`. Scheduled scans default to the last 5-minute interval when no cursor exists.
 5. Set `SLACK_CHANNEL_ID=C0BBH9RE3GV` for the `fraud-hold-system` Slack channel. `SLACK_BOT_TOKEN` is preferred for channel posting; `SLACK_WEBHOOK_URL` remains supported as a fallback.
 
 The secret name must be `SLACK_BOT_TOKEN`; paste the `xoxb-...` token only when Wrangler prompts for the secret value.
@@ -35,6 +36,12 @@ Current staging admin base URL:
 
 ```text
 https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf
+```
+
+Current Misthub admin base URL:
+
+```text
+https://sdhds5.misthub.com/Gi3ygQ6cafEK7hZf6uzf
 ```
 
 Slack hold alert format:

@@ -17,7 +17,8 @@ export interface ListOrdersParams {
 }
 
 export function createMagentoClient(site: SiteConfig, accessToken: string): MagentoClient {
-  const base = `${normalizeBaseUrl(site.baseUrl)}/rest/${encodeURIComponent(site.storeCode ?? "default")}/V1`;
+  const storePath = site.storeCode ? `/${encodeURIComponent(site.storeCode)}` : "";
+  const base = `${normalizeBaseUrl(site.baseUrl)}/rest${storePath}/V1`;
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`${base}${path}`, {

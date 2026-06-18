@@ -6,6 +6,7 @@ import {
   getSiteCursor,
   getReviewSummary,
   markHoldAlreadySatisfied,
+  markHoldNotAttempted,
   markHoldResult,
   markHoldSkipped,
   markSlackResult,
@@ -19,18 +20,22 @@ import { sendSlackHoldAlert } from "./slack";
 import type { Env, MagentoCustomer, MagentoOrder, RunStats, SiteConfig } from "./types";
 
 const PAGE_SIZE = 100;
-const DEFAULT_START_LOOKBACK_HOURS = 24;
+const DEFAULT_SCHEDULE_INTERVAL_MINUTES = 5;
 
 export async function scanAllSites(env: Env, scheduledAt: Date): Promise<RunStats> {
   const aggregate: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
   const sites = getSites(env);
 
   for (const site of sites) {
-    const stats = await scanSite(env, site, scheduledAt);
-    aggregate.pagesFetched += stats.pagesFetched;
-    aggregate.ordersEvaluated += stats.ordersEvaluated;
-    aggregate.holdsAttempted += stats.holdsAttempted;
-    aggregate.holdsSucceeded += stats.holdsSucceeded;
+    try {
+      const stats = await scanSite(env, site, scheduledAt);
+      aggregate.pagesFetched += stats.pagesFetched;
+      aggregate.ordersEvaluated += stats.ordersEvaluated;
+      aggregate.holdsAttempted += stats.holdsAttempted;
+      aggregate.holdsSucceeded += stats.holdsSucceeded;
+    } catch (error) {
+      console.error(`Fraud scan failed for site ${site.id}`, error);
+    }
   }
 
   return aggregate;
@@ -121,6 +126,14 @@ export async function reviewOrder(
     await markHoldSkipped(env.DB, reviewId, order.status ?? null, "dry run: Magento hold skipped");
   } else if (decision.decision === "hold" && isAlreadyHoldStatus(order.status)) {
     await markHoldAlreadySatisfied(env.DB, reviewId, order.status ?? null, actionMode);
+  } else if (decision.decision === "hold" && !isHoldableStatus(order.status)) {
+    await markHoldNotAttempted(
+      env.DB,
+      reviewId,
+      order.status ?? null,
+      `status ${order.status ?? "unknown"} is not holdable`,
+      actionMode
+    );
   } else if (decision.decision === "hold") {
     stats.holdsAttempted += 1;
     try {
@@ -146,18 +159,17 @@ export async function reviewOrder(
       }
     } catch (error) {
       await markHoldResult(env.DB, reviewId, false, order.status ?? null, errorToString(error), actionMode);
-      throw error;
     }
   }
 
   await recordOrderSignal(env.DB, site, order, signal, reviewedAt);
 }
 
-async function getScanStart(db: D1Database, site: SiteConfig, scheduledAt: Date): Promise<string> {
+export async function getScanStart(db: D1Database, site: SiteConfig, scheduledAt: Date): Promise<string> {
   const cursor = await getSiteCursor(db, site.id);
   const base = cursor.lastSuccessCreatedAt
     ? parseMagentoDateMs(cursor.lastSuccessCreatedAt)
-    : scheduledAt.getTime() - (site.initialLookbackHours ?? DEFAULT_START_LOOKBACK_HOURS) * 3_600_000;
+    : scheduledAt.getTime() - (site.scanIntervalMinutes ?? DEFAULT_SCHEDULE_INTERVAL_MINUTES) * 60_000;
   const overlapMs = getCursorOverlapMinutes(site) * 60_000;
   return formatMagentoDate(new Date(base - overlapMs));
 }
@@ -201,6 +213,10 @@ function maxProcessed(
 
 function isAlreadyHoldStatus(status: string | undefined): boolean {
   return ["holded", "payment_review", "fraud"].includes(String(status ?? "").toLowerCase());
+}
+
+function isHoldableStatus(status: string | undefined): boolean {
+  return ["pending", "processing"].includes(String(status ?? "").toLowerCase());
 }
 
 function errorToString(error: unknown): string {

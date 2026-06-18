@@ -218,6 +218,23 @@ export async function markHoldSkipped(
     .run();
 }
 
+export async function markHoldNotAttempted(
+  db: D1Database,
+  reviewId: string,
+  statusAfter: string | null,
+  reason: string,
+  actionMode: "live" | "dry_run" = "live"
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE order_reviews
+       SET action_mode = ?, hold_attempted = 0, hold_succeeded = 0, status_after = ?, hold_error = ?
+       WHERE id = ?`
+    )
+    .bind(actionMode, statusAfter, reason, reviewId)
+    .run();
+}
+
 export async function markHoldAlreadySatisfied(
   db: D1Database,
   reviewId: string,

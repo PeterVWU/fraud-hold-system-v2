@@ -23,7 +23,7 @@ export interface SiteConfig {
   paymentFingerprintPaths: string[];
   holdThreshold?: number;
   cursorOverlapMinutes?: number;
-  initialLookbackHours?: number;
+  scanIntervalMinutes?: number;
 }
 
 export interface MagentoOrderAddress {

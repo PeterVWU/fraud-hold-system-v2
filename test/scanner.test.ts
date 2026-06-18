@@ -8,6 +8,7 @@ vi.mock("../src/db", () => ({
   getSiteCursor: vi.fn().mockResolvedValue({ lastSuccessCreatedAt: null, lastSuccessOrderId: null }),
   getReviewSummary: vi.fn().mockResolvedValue(null),
   markHoldAlreadySatisfied: vi.fn().mockResolvedValue(undefined),
+  markHoldNotAttempted: vi.fn().mockResolvedValue(undefined),
   markHoldResult: vi.fn().mockResolvedValue(undefined),
   markHoldSkipped: vi.fn().mockResolvedValue(undefined),
   markSlackResult: vi.fn().mockResolvedValue(undefined),
@@ -21,8 +22,8 @@ vi.mock("../src/slack", () => ({
   sendSlackHoldAlert: vi.fn().mockResolvedValue({ attempted: true, succeeded: true, error: null })
 }));
 
-import { markHoldResult, markSlackResult } from "../src/db";
-import { reviewOrder } from "../src/scanner";
+import { getSiteCursor, markHoldNotAttempted, markHoldResult, markSlackResult } from "../src/db";
+import { getScanStart, reviewOrder } from "../src/scanner";
 import { sendSlackHoldAlert } from "../src/slack";
 
 describe("scanner hold notifications", () => {
@@ -61,6 +62,65 @@ describe("scanner hold notifications", () => {
     );
     expect(markSlackResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), true, null);
     expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 1, holdsSucceeded: 1 });
+  });
+
+  it("does not call Magento hold for completed suspicious orders", async () => {
+    const client = {
+      listOrders: vi.fn(),
+      getOrder: vi.fn(),
+      getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      holdOrder: vi.fn(),
+      getOrderStatus: vi.fn(),
+      addOrderComment: vi.fn()
+    };
+    const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+    const order = { ...suspiciousOrder(), status: "complete" };
+
+    await reviewOrder(env(), site(), client, order, new Date("2026-06-18T12:00:00Z"), stats);
+
+    expect(client.holdOrder).not.toHaveBeenCalled();
+    expect(sendSlackHoldAlert).not.toHaveBeenCalled();
+    expect(markHoldNotAttempted).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "complete",
+      "status complete is not holdable",
+      "live"
+    );
+    expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 0, holdsSucceeded: 0 });
+  });
+});
+
+describe("scanner interval window", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses only the configured scan interval when no cursor exists", async () => {
+    vi.mocked(getSiteCursor).mockResolvedValueOnce({ lastSuccessCreatedAt: null, lastSuccessOrderId: null });
+
+    const scanStart = await getScanStart(
+      {} as D1Database,
+      { ...site(), scanIntervalMinutes: 5, cursorOverlapMinutes: 0 },
+      new Date("2026-06-18T12:00:00Z")
+    );
+
+    expect(scanStart).toBe("2026-06-18 11:55:00");
+  });
+
+  it("uses the saved cursor after a successful run", async () => {
+    vi.mocked(getSiteCursor).mockResolvedValueOnce({
+      lastSuccessCreatedAt: "2026-06-18 11:58:00",
+      lastSuccessOrderId: 9002
+    });
+
+    const scanStart = await getScanStart(
+      {} as D1Database,
+      { ...site(), scanIntervalMinutes: 5, cursorOverlapMinutes: 0 },
+      new Date("2026-06-18T12:00:00Z")
+    );
+
+    expect(scanStart).toBe("2026-06-18 11:58:00");
   });
 });
 
