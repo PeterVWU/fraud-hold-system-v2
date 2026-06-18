@@ -6,7 +6,7 @@
   "compatibility_date": "2026-06-18",
   "workers_dev": true,
   "vars": {
-    "MAGENTO_SITES_JSON": "[{\"id\":\"main\",\"name\":\"Main Magento\",\"baseUrl\":\"https://magento.example.com\",\"adminBaseUrl\":\"https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf\",\"storeCode\":\"default\",\"accessTokenEnv\":\"MAGENTO_MAIN_ACCESS_TOKEN\",\"enabled\":true,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"holdThreshold\":2,\"cursorOverlapMinutes\":10,\"initialLookbackHours\":24}]",
+    "MAGENTO_SITES_JSON": "[{\"id\":\"staging\",\"name\":\"Staging Magento\",\"baseUrl\":\"https://staging.vapewholesaleusa.com\",\"adminBaseUrl\":\"https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf\",\"storeCode\":\"default\",\"accessTokenEnv\":\"MAGENTO_MAIN_ACCESS_TOKEN\",\"enabled\":true,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"holdThreshold\":2,\"cursorOverlapMinutes\":10,\"initialLookbackHours\":24}]",
     "DEFAULT_HOLD_THRESHOLD": "2",
     "MANUAL_RUN_TOKEN_ENV": "MANUAL_RUN_TOKEN",
     "HOLD_ACTION_MODE": "live",
@@ -17,7 +17,7 @@
     {
       "binding": "DB",
       "database_name": "fraud_hold_system",
-      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "database_id": "01b479e3-b4a7-423f-8943-6c3289b90598",
       "migrations_dir": "migrations"
     }
   ],
@@ -25,10 +25,12 @@
     {
       "name": "fraud-scan-workflow",
       "binding": "FRAUD_SCAN_WORKFLOW",
-      "class_name": "FraudScanWorkflow",
-      "schedules": ["*/5 * * * *"]
+      "class_name": "FraudScanWorkflow"
     }
   ],
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  },
   "observability": {
     "enabled": true
   }

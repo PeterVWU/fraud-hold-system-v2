@@ -12,6 +12,17 @@ export class FraudScanWorkflow extends WorkflowEntrypoint<Env> {
 }
 
 export default {
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(
+      env.FRAUD_SCAN_WORKFLOW.create({
+        params: {
+          triggeredBy: "cron",
+          scheduledTime: controller.scheduledTime
+        }
+      })
+    );
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
