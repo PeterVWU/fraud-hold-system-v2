@@ -1,0 +1,22 @@
+{
+  "name": "fraud-hold-system-v2",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply fraud_hold_system --local",
+    "db:migrate:remote": "wrangler d1 migrations apply fraud_hold_system --remote",
+    "verify": "npm run test && npm run typecheck && HOME=/tmp npx wrangler deploy --dry-run",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.64",
+    "@cloudflare/workers-types": "^4.20260617.1",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4",
+    "wrangler": "^4.22.0"
+  }
+}

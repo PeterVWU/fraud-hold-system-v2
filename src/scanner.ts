@@ -1,0 +1,208 @@
+import { getAccessToken, getCursorOverlapMinutes, getHoldActionMode, getSites } from "./config";
+import {
+  createReview,
+  createRunLog,
+  finishRunLog,
+  getSiteCursor,
+  getReviewSummary,
+  markHoldAlreadySatisfied,
+  markHoldResult,
+  markHoldSkipped,
+  markSlackResult,
+  recordOrderSignal,
+  updateSiteCursor
+} from "./db";
+import { createMagentoClient, type MagentoClient } from "./magento";
+import { buildOrderSignal, formatMagentoDate, getOrderCreatedAt, getOrderEntityId, parseMagentoDateMs } from "./normalizers";
+import { evaluateFraudRules, formatFraudComment } from "./ruleEngine";
+import { sendSlackHoldAlert } from "./slack";
+import type { Env, MagentoCustomer, MagentoOrder, RunStats, SiteConfig } from "./types";
+
+const PAGE_SIZE = 100;
+const DEFAULT_START_LOOKBACK_HOURS = 24;
+
+export async function scanAllSites(env: Env, scheduledAt: Date): Promise<RunStats> {
+  const aggregate: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+  const sites = getSites(env);
+
+  for (const site of sites) {
+    const stats = await scanSite(env, site, scheduledAt);
+    aggregate.pagesFetched += stats.pagesFetched;
+    aggregate.ordersEvaluated += stats.ordersEvaluated;
+    aggregate.holdsAttempted += stats.holdsAttempted;
+    aggregate.holdsSucceeded += stats.holdsSucceeded;
+  }
+
+  return aggregate;
+}
+
+export async function scanSite(env: Env, site: SiteConfig, scheduledAt: Date): Promise<RunStats> {
+  const startedAt = new Date().toISOString();
+  const runLogId = await createRunLog(env.DB, site.id, startedAt);
+  const stats: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+
+  try {
+    const client = createMagentoClient(site, getAccessToken(env, site));
+    const createdAtGte = await getScanStart(env.DB, site, scheduledAt);
+    let currentPage = 1;
+    let newestProcessed: { createdAt: string; orderId: number } | null = null;
+
+    while (true) {
+      const orders = await client.listOrders({ createdAtGte, pageSize: PAGE_SIZE, currentPage });
+      stats.pagesFetched += 1;
+      if (orders.length === 0) {
+        break;
+      }
+
+      for (const listOrder of orders) {
+        const orderId = getOrderEntityId(listOrder);
+        const existingReview = await getReviewSummary(env.DB, site.id, orderId);
+        if (existingReview && (existingReview.decision === "allow" || existingReview.holdSucceeded)) {
+          newestProcessed = maxProcessed(newestProcessed, listOrder);
+          continue;
+        }
+
+        const order = await ensureCompleteOrder(client, listOrder);
+        await reviewOrder(env, site, client, order, scheduledAt, stats, existingReview?.id ?? null);
+        newestProcessed = maxProcessed(newestProcessed, order);
+      }
+
+      if (orders.length < PAGE_SIZE) {
+        break;
+      }
+      currentPage += 1;
+    }
+
+    if (newestProcessed) {
+      await updateSiteCursor(env.DB, site.id, newestProcessed.createdAt, newestProcessed.orderId, new Date().toISOString());
+    }
+
+    await finishRunLog(env.DB, runLogId, new Date().toISOString(), "success", stats, null);
+    return stats;
+  } catch (error) {
+    await finishRunLog(env.DB, runLogId, new Date().toISOString(), "failed", stats, errorToString(error));
+    throw error;
+  }
+}
+
+export async function reviewOrder(
+  env: Env,
+  site: SiteConfig,
+  client: MagentoClient,
+  order: MagentoOrder,
+  scheduledAt: Date,
+  stats: RunStats,
+  existingReviewId: string | null = null
+): Promise<void> {
+  const signal = await buildOrderSignal(order, site);
+  const customer = await fetchCustomerIfAvailable(client, order);
+  const decision = await evaluateFraudRules(env, site, order, {
+    db: env.DB,
+    now: scheduledAt,
+    signal,
+    customer
+  });
+  const reviewedAt = new Date().toISOString();
+  const reviewId = existingReviewId ?? crypto.randomUUID();
+  const actionMode = getHoldActionMode(env);
+  const inserted = existingReviewId
+    ? true
+    : await createReview(env.DB, { reviewId, site, order, signal, decision, reviewedAt, actionMode });
+
+  if (!inserted) {
+    return;
+  }
+
+  if (!existingReviewId) {
+    stats.ordersEvaluated += 1;
+  }
+
+  if (decision.decision === "hold" && actionMode === "dry_run") {
+    await markHoldSkipped(env.DB, reviewId, order.status ?? null, "dry run: Magento hold skipped");
+  } else if (decision.decision === "hold" && isAlreadyHoldStatus(order.status)) {
+    await markHoldAlreadySatisfied(env.DB, reviewId, order.status ?? null, actionMode);
+  } else if (decision.decision === "hold") {
+    stats.holdsAttempted += 1;
+    try {
+      const held = await client.holdOrder(getOrderEntityId(order));
+      const statusAfter = held ? await client.getOrderStatus(getOrderEntityId(order)) : order.status ?? null;
+      await client.addOrderComment(getOrderEntityId(order), statusAfter, formatFraudComment(decision));
+      await markHoldResult(env.DB, reviewId, held, statusAfter, held ? null : "Magento returned false", actionMode);
+      if (held) {
+        stats.holdsSucceeded += 1;
+        const slackResult = await sendSlackHoldAlert(
+          {
+            webhookUrl: env.SLACK_WEBHOOK_URL,
+            botToken: env.SLACK_BOT_TOKEN,
+            channelId: env.SLACK_CHANNEL_ID
+          },
+          site,
+          order,
+          decision
+        );
+        if (slackResult.attempted) {
+          await markSlackResult(env.DB, reviewId, slackResult.succeeded, slackResult.error);
+        }
+      }
+    } catch (error) {
+      await markHoldResult(env.DB, reviewId, false, order.status ?? null, errorToString(error), actionMode);
+      throw error;
+    }
+  }
+
+  await recordOrderSignal(env.DB, site, order, signal, reviewedAt);
+}
+
+async function getScanStart(db: D1Database, site: SiteConfig, scheduledAt: Date): Promise<string> {
+  const cursor = await getSiteCursor(db, site.id);
+  const base = cursor.lastSuccessCreatedAt
+    ? parseMagentoDateMs(cursor.lastSuccessCreatedAt)
+    : scheduledAt.getTime() - (site.initialLookbackHours ?? DEFAULT_START_LOOKBACK_HOURS) * 3_600_000;
+  const overlapMs = getCursorOverlapMinutes(site) * 60_000;
+  return formatMagentoDate(new Date(base - overlapMs));
+}
+
+async function ensureCompleteOrder(client: MagentoClient, order: MagentoOrder): Promise<MagentoOrder> {
+  if (order.billing_address && order.extension_attributes) {
+    return order;
+  }
+  return client.getOrder(getOrderEntityId(order));
+}
+
+async function fetchCustomerIfAvailable(client: MagentoClient, order: MagentoOrder): Promise<MagentoCustomer | null> {
+  if (!order.customer_id) {
+    return null;
+  }
+
+  try {
+    return await client.getCustomer(order.customer_id);
+  } catch {
+    return null;
+  }
+}
+
+function maxProcessed(
+  current: { createdAt: string; orderId: number } | null,
+  order: MagentoOrder
+): { createdAt: string; orderId: number } {
+  const next = { createdAt: getOrderCreatedAt(order), orderId: getOrderEntityId(order) };
+  if (!current) {
+    return next;
+  }
+
+  if (next.createdAt > current.createdAt) {
+    return next;
+  }
+  if (next.createdAt === current.createdAt && next.orderId > current.orderId) {
+    return next;
+  }
+  return current;
+}
+
+function isAlreadyHoldStatus(status: string | undefined): boolean {
+  return ["holded", "payment_review", "fraud"].includes(String(status ?? "").toLowerCase());
+}
+
+function errorToString(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}

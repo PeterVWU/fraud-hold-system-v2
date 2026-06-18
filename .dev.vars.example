@@ -1,0 +1,7 @@
+MAGENTO_MAIN_ACCESS_TOKEN=replace-with-magento-admin-or-integration-token
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/replace/me
+SLACK_BOT_TOKEN=xoxb-replace-with-slack-bot-token
+SLACK_CHANNEL_ID=C0BBH9RE3GV
+MANUAL_RUN_TOKEN=replace-with-random-token-for-manual-runs
+HOLD_ACTION_MODE=dry_run
+LOCAL_RUN_DIRECT=true

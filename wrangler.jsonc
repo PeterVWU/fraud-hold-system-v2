@@ -1,0 +1,35 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fraud-hold-system-v2",
+  "account_id": "fba218ecd7eee5c433d49dc3515a0af0",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-18",
+  "workers_dev": true,
+  "vars": {
+    "MAGENTO_SITES_JSON": "[{\"id\":\"main\",\"name\":\"Main Magento\",\"baseUrl\":\"https://magento.example.com\",\"adminBaseUrl\":\"https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf\",\"storeCode\":\"default\",\"accessTokenEnv\":\"MAGENTO_MAIN_ACCESS_TOKEN\",\"enabled\":true,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"holdThreshold\":2,\"cursorOverlapMinutes\":10,\"initialLookbackHours\":24}]",
+    "DEFAULT_HOLD_THRESHOLD": "2",
+    "MANUAL_RUN_TOKEN_ENV": "MANUAL_RUN_TOKEN",
+    "HOLD_ACTION_MODE": "live",
+    "LOCAL_RUN_DIRECT": "false",
+    "SLACK_CHANNEL_ID": "C0BBH9RE3GV"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "fraud_hold_system",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "workflows": [
+    {
+      "name": "fraud-scan-workflow",
+      "binding": "FRAUD_SCAN_WORKFLOW",
+      "class_name": "FraudScanWorkflow",
+      "schedules": ["*/5 * * * *"]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
