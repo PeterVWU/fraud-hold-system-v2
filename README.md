@@ -12,10 +12,22 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Set `HOLD_ACTION_MODE=dry_run` for staging/read-only scans; use `live` to update Magento order status.
 - Slack alerts are sent after a successful Magento hold through `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID`.
 - Slack hold messages keep the order details and add a final Magento admin link when `adminBaseUrl` is configured.
+- Site scans are isolated: a failure on one Magento site is logged but does not stop other enabled sites.
+- Non-holdable statuses, such as `complete`, are recorded but are not sent to the Magento hold API.
+
+## Current Deployment
+
+- Worker URL: `https://fraud-hold-system-v2.info-ba2.workers.dev`
+- Worker name: `fraud-hold-system-v2`
+- Workflow: `fraud-scan-workflow`
+- D1 database: `fraud_hold_system`
+- Schedule: every 5 minutes
+- Last documented deployed version: `778185fc-959e-4202-87bc-cc7b974952de`
+- Current deployed mode: `HOLD_ACTION_MODE=live`
 
 ## Configure
 
-1. Create a D1 database and replace `REPLACE_WITH_D1_DATABASE_ID` in `wrangler.jsonc`.
+1. Create a D1 database and set its `database_id` in `wrangler.jsonc`.
 2. Copy `.dev.vars.example` to `.dev.vars` for local development.
 3. Set Magento and Slack secrets in Cloudflare:
 
@@ -32,13 +44,30 @@ npx wrangler secret put MANUAL_RUN_TOKEN
 
 The secret name must be `SLACK_BOT_TOKEN`; paste the `xoxb-...` token only when Wrangler prompts for the secret value.
 
-Current staging admin base URL:
+## Sites
+
+### Staging
+
+- Enabled in config: yes
+- Magento base URL: `https://staging.vapewholesaleusa.com`
+- Secret name: `MAGENTO_MAIN_ACCESS_TOKEN`
+- Current blocker: staging REST requests reach the origin after the Cloudflare WAF skip rule, but nginx basic auth still returns 401 unless REST API paths are exempted.
+
+Admin base URL:
 
 ```text
 https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf
 ```
 
-Current Misthub admin base URL:
+### Misthub
+
+- Enabled in config: no
+- Magento base URL: `https://misthub.com`
+- Secret name: `MAGENTO_MISTHUB_ACCESS_TOKEN`
+- REST base path: `/rest/V1` (`storeCode` is an empty string in config)
+- Status: disabled after a live test run. Do not re-enable without explicit approval.
+
+Admin base URL:
 
 ```text
 https://sdhds5.misthub.com/Gi3ygQ6cafEK7hZf6uzf
@@ -83,6 +112,14 @@ Health check:
 curl https://<worker-url>/health
 ```
 
+Inspect recent remote run logs:
+
+```bash
+npx wrangler d1 execute fraud_hold_system --remote --command "SELECT site_id, started_at, finished_at, status, pages_fetched, orders_evaluated, holds_attempted, holds_succeeded, substr(error, 1, 180) AS error_summary FROM run_logs ORDER BY started_at DESC LIMIT 10"
+```
+
 ## Regression Testing
 
 See `TESTING.md` for the required automated checks and staging Magento regression tests, including the positive hold case and the negative no-status-change case.
+
+See `AGENTS.md` for agent handoff notes and operational context.

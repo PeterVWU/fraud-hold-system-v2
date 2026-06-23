@@ -19,6 +19,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
+- Current expected unit test count is 13.
 
 ## Local D1 Setup
 
@@ -89,6 +90,48 @@ Expected evidence from the verified staging run:
 - D1 hold attempted: `0`
 - Only matched rule: `zip_state_mismatch`
 
+## Scheduled Interval Window Test
+
+Purpose: prove scheduled scans do not backfill a large order window when no cursor exists.
+
+Covered by automated tests in `test/scanner.test.ts`.
+
+Expected behavior:
+
+- If a site has no cursor, the scan starts at `scheduledAt - scanIntervalMinutes`.
+- Current configured interval is 5 minutes.
+- Current configured cursor overlap is 0 minutes.
+- If a cursor exists, the scan starts from `site_cursors.last_success_created_at`.
+- A site with `enabled:false` is ignored.
+
+This prevents a newly enabled site from processing a full day of orders by default.
+
+## Multi-Site Isolation Test
+
+Purpose: prove one Magento site failure does not block other enabled sites.
+
+Expected behavior:
+
+- Each site gets its own `run_logs` row.
+- A failed site records `status=failed` and the error.
+- `scanAllSites` logs the site error and continues to the next site.
+- Aggregate run stats include successful site work only.
+
+Misthub live testing confirmed the scanner continued after staging failed with origin nginx 401.
+
+## Non-Holdable Status Test
+
+Purpose: prove suspicious orders in terminal statuses are recorded without calling Magento hold.
+
+Covered by automated tests in `test/scanner.test.ts`.
+
+Expected behavior:
+
+- A suspicious order with `status=complete` gets `decision=hold`.
+- The system records `hold_attempted=0`.
+- The system records a `hold_error` such as `status complete is not holdable`.
+- Slack is not sent because no Magento hold succeeded.
+
 ## Secrets Handling
 
 Do not commit staging tokens. For local staging runs, put secrets in a temporary file under `/tmp`, pass it with `--env-file`, then delete it after the run.
@@ -113,12 +156,22 @@ rm /tmp/fraud-hold-staging.vars
 
 - Scheduled Cloudflare Workflow exists with `*/5 * * * *`.
 - Multiple Magento sites are configurable through `MAGENTO_SITES_JSON`.
+- Disabled sites are skipped through each site's `enabled` flag.
 - New orders are fetched from Magento and paged through by `created_at`.
+- No-cursor scheduled scans only check the configured interval, currently 5 minutes.
 - Rules are modular and can be enabled, disabled, added, or removed in `src/rules.ts`.
 - Threshold matching holds only when matched non-required rules reach the configured threshold.
 - Required-rule support exists through each rule's `required` flag.
 - Matched and non-matched rule evidence is stored in D1.
 - Suspicious orders are updated to Magento hold status only in `live` mode.
+- Suspicious orders in non-holdable statuses are recorded without a Magento hold API call.
 - Below-threshold orders remain unchanged.
 - Slack alert code is tested for bot-token channel posting, webhook fallback, API errors, and clean skip when Slack is unconfigured.
 - Scanner hold path is tested to confirm Slack is called only after Magento hold succeeds.
+
+## Live Operational Notes
+
+- Staging currently requires origin nginx basic-auth changes before live scans can evaluate orders.
+- Misthub is configured but disabled. Do not re-enable without explicit approval.
+- Misthub's REST base is `/rest/V1`, represented by `storeCode: ""`.
+- Last Misthub live test before disabling evaluated 104 orders and held 14 orders.
