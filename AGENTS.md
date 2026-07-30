@@ -19,7 +19,7 @@
 - `MAGENTO_ORDER_UPDATES_ENABLED=true`.
 - `CUSTOMER_EMAIL_ENABLED=true`.
 - `HOLD_ACTION_MODE=live`.
-- `CUSTOMER_HISTORY_EXEMPTION_MONTHS=6` (positive whole calendar months; missing or invalid values default to 12).
+- `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12` (positive whole calendar months; missing or invalid values default to 12).
 - `LOCAL_RUN_DIRECT=false`; `/run` queues a Workflow.
 - VWU production scanning, Magento holds, verification-case creation, Slack alerts, and customer emails were verified working after the Cloudflare skip rule was expanded to allow authenticated POST requests.
 - Four verified production orders (`000574263`, `000574269`, `000574275`, and `000574302`) completed the hold/Slack/email/queue flow. `000574302` was later released and its case marked approved because of a false-positive ZIP/state comparison.
