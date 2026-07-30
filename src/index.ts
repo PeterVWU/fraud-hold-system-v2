@@ -220,10 +220,14 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
   if (url.pathname === "/staff") {
     const cases = await listStaffCases(env.DB);
     return renderStaffList(
-      cases.map((item) => ({
-        ...item,
-        adminOrderUrl: buildMagentoAdminOrderUrl(getSiteForCase(env, item.siteId), item.magentoOrderId)
-      }))
+      cases.map((item) => {
+        const site = getSiteForCase(env, item.siteId);
+        return {
+          ...item,
+          adminOrderUrl: buildMagentoAdminOrderUrl(site, item.magentoOrderId),
+          timeZone: site.timeZone
+        };
+      })
     );
   }
 

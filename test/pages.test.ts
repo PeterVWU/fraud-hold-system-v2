@@ -20,7 +20,8 @@ describe("staff verification queue", () => {
         matchedRuleNames: ["Order total >= $150"],
         createdAt: "2026-07-29T00:00:00.000Z",
         updatedAt: "2026-07-29T00:00:00.000Z",
-        adminOrderUrl: "https://admin.example.com/sales/order/view/order_id/123/"
+        adminOrderUrl: "https://admin.example.com/sales/order/view/order_id/123/",
+        timeZone: "America/Los_Angeles"
       }
     ]);
     const body = await response.text();
@@ -28,6 +29,9 @@ describe("staff verification queue", () => {
     expect(body).toContain('href="https://admin.example.com/sales/order/view/order_id/123/"');
     expect(body).toContain('target="_blank"');
     expect(body).toContain('rel="noopener noreferrer"');
+    expect(body).toContain('<time datetime="2026-07-29T00:00:00.000Z"');
+    expect(body).toContain("Jul 28, 2026, 5:00 PM PDT");
+    expect(body).toContain('title="2026-07-29T00:00:00.000Z (UTC)"');
   });
 
   it("labels the action Decline and reminds staff to refund manually", async () => {

@@ -28,6 +28,7 @@ export interface SiteConfig {
   baseUrl: string;
   adminBaseUrl?: string;
   storeCode?: string;
+  timeZone?: string;
   accessTokenEnv: string;
   enabled: boolean;
   paymentFingerprintPaths: string[];

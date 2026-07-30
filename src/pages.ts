@@ -30,10 +30,12 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 </main>`);
 }
 
-export function renderStaffList(cases: Array<VerificationCase & { adminOrderUrl: string | null }>): Response {
+export function renderStaffList(
+  cases: Array<VerificationCase & { adminOrderUrl: string | null; timeZone?: string }>
+): Response {
   const rows = cases
     .map(
-      (item) => `<tr><td><a href="/staff/cases/${item.id}">${escapeHtml(item.incrementId ?? String(item.magentoOrderId))}</a></td><td>${item.adminOrderUrl ? `<a href="${escapeHtml(item.adminOrderUrl)}" target="_blank" rel="noopener noreferrer">Open in Magento</a>` : "Not configured"}</td><td>${escapeHtml(item.siteId)}</td><td>${escapeHtml(item.status)}</td><td>${renderRuleList(item.matchedRuleNames)}</td><td>${escapeHtml(item.emailStatus)}</td><td>${escapeHtml(item.customerEmail ?? "")}</td><td>${escapeHtml(item.updatedAt)}</td></tr>`
+      (item) => `<tr><td><a href="/staff/cases/${item.id}">${escapeHtml(item.incrementId ?? String(item.magentoOrderId))}</a></td><td>${item.adminOrderUrl ? `<a href="${escapeHtml(item.adminOrderUrl)}" target="_blank" rel="noopener noreferrer">Open in Magento</a>` : "Not configured"}</td><td>${escapeHtml(item.siteId)}</td><td>${escapeHtml(item.status)}</td><td>${renderRuleList(item.matchedRuleNames)}</td><td>${escapeHtml(item.emailStatus)}</td><td>${escapeHtml(item.customerEmail ?? "")}</td><td>${renderDateTime(item.updatedAt, item.timeZone)}</td></tr>`
     )
     .join("");
   return html(`<main class="shell">
@@ -85,6 +87,35 @@ function renderRuleList(ruleNames: string[]): string {
   return ruleNames.length > 0
     ? `<ul class="rules">${ruleNames.map((name) => `<li>${escapeHtml(name)}</li>`).join("")}</ul>`
     : "No matched-rule details recorded.";
+}
+
+function renderDateTime(value: string, timeZone = "UTC"): string {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) {
+    return escapeHtml(value);
+  }
+
+  const effectiveTimeZone = isValidTimeZone(timeZone) ? timeZone : "UTC";
+  const display = new Intl.DateTimeFormat("en-US", {
+    timeZone: effectiveTimeZone,
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short"
+  }).format(date);
+  const utc = date.toISOString();
+  return `<time datetime="${escapeHtml(utc)}" title="${escapeHtml(`${utc} (UTC)`)}">${escapeHtml(display)}</time>`;
+}
+
+function isValidTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone }).format();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function redirect(location: string, headers: HeadersInit = {}): Response {

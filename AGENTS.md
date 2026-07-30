@@ -32,6 +32,7 @@
 - Enabled: true.
 - Base URL: `https://vapewholesaleusa.com`.
 - REST base: `/rest/V1` (`storeCode: ""`).
+- Timezone: `America/Los_Angeles`.
 - Access-token secret: `MAGENTO_MAIN_ACCESS_TOKEN`.
 - Extra perimeter header:
   - name: `x-vwu-agent-auth`
@@ -44,6 +45,7 @@
 - Enabled: true.
 - Base URL: `https://staging.vapewholesaleusa.com`.
 - REST base: `/rest/default/V1`.
+- Timezone: `America/Los_Angeles`.
 - Access-token secret: `MAGENTO_STAGING_ACCESS_TOKEN`.
 - Known production blocker: requests from the deployed Worker receive an nginx HTML `401 Authorization Required` before reaching Magento. The same token works locally. Staging `/rest/` must be exempted from nginx Basic Auth or protected with a separate custom header.
 - Site failures are isolated, so this recurring staging failure does not stop VWU.
@@ -54,6 +56,7 @@
 - Enabled: false.
 - Base URL: `https://misthub.com`.
 - REST base: `/rest/V1` (`storeCode: ""`).
+- Timezone: `America/Los_Angeles`.
 - Access-token secret: `MAGENTO_MISTHUB_ACCESS_TOKEN`.
 - Do not re-enable without explicit user approval.
 
@@ -92,6 +95,7 @@
   3. Send Slack only after Magento hold succeeds.
 - Staff queue: `/staff`; login: `/staff/login`.
 - Queue and case pages include Magento admin links opening in a new tab.
+- Staff queue timestamps are formatted in each site's configured `MAGENTO_SITES_JSON.timeZone`, with UTC retained in the HTML timestamp and tooltip.
 - Approve releases the Magento hold and expects status `processing`; completed cases hide further action buttons and show a success message.
 - Decline is not considered production-ready:
   - Intended flow: unhold, create an offline invoice credit memo, then accept Magento `closed` or `canceled`; staff refunds the payment manually in Authorize.net.
