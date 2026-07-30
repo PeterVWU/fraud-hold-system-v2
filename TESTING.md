@@ -19,7 +19,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 38.
+- Current expected unit test count is 48.
 
 ## Local D1 Setup
 

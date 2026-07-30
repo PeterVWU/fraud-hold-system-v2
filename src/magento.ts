@@ -1,11 +1,11 @@
 import { normalizeBaseUrl } from "./config";
-import type { MagentoCustomer, MagentoInvoice, MagentoOrder, SiteConfig } from "./types";
+import type { CompletedOrderHistory, MagentoCustomer, MagentoInvoice, MagentoOrder, SiteConfig } from "./types";
 
 export interface MagentoClient {
   listOrders(params: ListOrdersParams): Promise<MagentoOrder[]>;
   getOrder(orderId: number): Promise<MagentoOrder>;
   getCustomer(customerId: number): Promise<MagentoCustomer>;
-  countCompletedOrders(customerId: number, createdBefore: string): Promise<number>;
+  getCompletedOrderHistory(customerId: number, createdBefore: string): Promise<CompletedOrderHistory>;
   listInvoices(orderId: number): Promise<MagentoInvoice[]>;
   holdOrder(orderId: number): Promise<boolean>;
   unholdOrder(orderId: number): Promise<boolean>;
@@ -80,7 +80,7 @@ export function createMagentoClient(
       return request<MagentoCustomer>(`/customers/${customerId}`);
     },
 
-    async countCompletedOrders(customerId, createdBefore) {
+    async getCompletedOrderHistory(customerId, createdBefore) {
       const query = new URLSearchParams({
         "searchCriteria[filterGroups][0][filters][0][field]": "customer_id",
         "searchCriteria[filterGroups][0][filters][0][value]": String(customerId),
@@ -91,11 +91,16 @@ export function createMagentoClient(
         "searchCriteria[filterGroups][2][filters][0][field]": "created_at",
         "searchCriteria[filterGroups][2][filters][0][value]": createdBefore,
         "searchCriteria[filterGroups][2][filters][0][conditionType]": "lt",
+        "searchCriteria[sortOrders][0][field]": "created_at",
+        "searchCriteria[sortOrders][0][direction]": "ASC",
         "searchCriteria[pageSize]": "1",
         "searchCriteria[currentPage]": "1"
       });
-      const result = await request<{ total_count?: number }>(`/orders?${query.toString()}`);
-      return Number(result.total_count ?? 0);
+      const result = await request<{ items?: MagentoOrder[]; total_count?: number }>(`/orders?${query.toString()}`);
+      return {
+        totalCount: Number(result.total_count ?? 0),
+        oldestCompletedOrderCreatedAt: result.items?.[0]?.created_at ?? null
+      };
     },
 
     async listInvoices(orderId) {

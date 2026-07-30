@@ -1,4 +1,4 @@
-import { getHoldThreshold } from "./config";
+import { getCustomerHistoryExemptionMonths, getHoldThreshold } from "./config";
 import { INITIAL_RULES } from "./rules";
 import type { Env, FraudDecision, MagentoOrder, RuleContext, RuleResult, SiteConfig } from "./types";
 
@@ -6,10 +6,14 @@ export async function evaluateFraudRules(
   env: Env,
   site: SiteConfig,
   order: MagentoOrder,
-  context: Omit<RuleContext, "site">
+  context: Omit<RuleContext, "site" | "customerHistoryExemptionMonths">
 ): Promise<FraudDecision> {
   const holdThreshold = getHoldThreshold(env, site);
-  const ruleContext: RuleContext = { ...context, site };
+  const ruleContext: RuleContext = {
+    ...context,
+    site,
+    customerHistoryExemptionMonths: getCustomerHistoryExemptionMonths(env)
+  };
   const ruleResults: RuleResult[] = [];
 
   for (const rule of INITIAL_RULES) {
@@ -25,6 +29,16 @@ export async function evaluateFraudRules(
       matched: result.matched,
       evidence: result.evidence
     });
+
+    if (rule.effect === "exemption" && result.matched) {
+      return {
+        decision: "allow",
+        holdThreshold,
+        matchedCount: 0,
+        requiredMatchedCount: 0,
+        ruleResults
+      };
+    }
   }
 
   const matchedCount = ruleResults.filter((result) => result.matched && !result.required).length;

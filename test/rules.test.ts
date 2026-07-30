@@ -106,6 +106,114 @@ describe("fraud rule engine", () => {
     ]);
   });
 
+  it("exempts a registered customer with a completed order at least one calendar year old", async () => {
+    const db = fakeDb({ recentCount: 1, differentPaymentOrBilling: true });
+    const decision = await evaluateFraudRules(env(), site, { ...baseOrder, grand_total: 200 }, {
+      db,
+      now: new Date(),
+      signal: { ...signal, grandTotal: 200 },
+      customer: null,
+      completedOrderHistory: {
+        status: "available",
+        history: {
+          totalCount: 1,
+          oldestCompletedOrderCreatedAt: "2025-06-18T10:00:00.000Z"
+        }
+      }
+    });
+
+    expect(decision).toMatchObject({
+      decision: "allow",
+      matchedCount: 0,
+      requiredMatchedCount: 0
+    });
+    expect(decision.ruleResults).toHaveLength(1);
+    expect(decision.ruleResults[0]).toMatchObject({
+      ruleId: "completed_order_older_than_exemption_threshold",
+      matched: true
+    });
+  });
+
+  it("continues normal rules when completed history is newer than the configured threshold", async () => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const decision = await evaluateFraudRules(env(), site, { ...baseOrder, grand_total: 200 }, {
+      db,
+      now: new Date(),
+      signal: { ...signal, grandTotal: 200 },
+      customer: null,
+      completedOrderHistory: {
+        status: "available",
+        history: {
+          totalCount: 1,
+          oldestCompletedOrderCreatedAt: "2025-06-18T10:00:01.000Z"
+        }
+      }
+    });
+
+    expect(decision.decision).toBe("allow");
+    expect(decision.matchedCount).toBe(1);
+    expect(decision.ruleResults.some((result) => result.ruleId === "order_total_gte_150" && result.matched)).toBe(true);
+  });
+
+  it("uses the configured number of calendar months", async () => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const decision = await evaluateFraudRules(
+      { ...env(), CUSTOMER_HISTORY_EXEMPTION_MONTHS: "6" },
+      site,
+      baseOrder,
+      {
+        db,
+        now: new Date(),
+        signal,
+        customer: null,
+        completedOrderHistory: {
+          status: "available",
+          history: {
+            totalCount: 1,
+            oldestCompletedOrderCreatedAt: "2025-12-18T10:00:00.000Z"
+          }
+        }
+      }
+    );
+
+    expect(decision.decision).toBe("allow");
+    expect(decision.ruleResults[0]).toMatchObject({
+      ruleId: "completed_order_older_than_exemption_threshold",
+      matched: true,
+      evidence: {
+        exemptionMonths: 6,
+        exemptionCutoff: "2025-12-18T10:00:00.000Z"
+      }
+    });
+  });
+
+  it("treats February 28 as one calendar year before a leap-day order", async () => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const decision = await evaluateFraudRules(env(), site, { ...baseOrder, created_at: "2024-02-29T10:00:00.000Z" }, {
+      db,
+      now: new Date(),
+      signal,
+      customer: null,
+      completedOrderHistory: {
+        status: "available",
+        history: {
+          totalCount: 1,
+          oldestCompletedOrderCreatedAt: "2023-02-28T10:00:00.000Z"
+        }
+      }
+    });
+
+    expect(decision.decision).toBe("allow");
+    expect(decision.ruleResults[0]).toMatchObject({
+      ruleId: "completed_order_older_than_exemption_threshold",
+      matched: true,
+      evidence: {
+        exemptionMonths: 12,
+        exemptionCutoff: "2023-02-28T10:00:00.000Z"
+      }
+    });
+  });
+
   it("detects billing and shipping mismatches", async () => {
     const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
     const order: MagentoOrder = {
@@ -166,7 +274,13 @@ describe("fraud rule engine", () => {
         now: new Date(),
         signal,
         customer: null,
-        getCompletedOrderCount: async () => completedOrderCount
+        completedOrderHistory: {
+          status: "available",
+          history: {
+            totalCount: completedOrderCount,
+            oldestCompletedOrderCreatedAt: "2026-01-01T00:00:00.000Z"
+          }
+        }
       });
 
       const addressMismatch = decision.ruleResults.find(

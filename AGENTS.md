@@ -10,8 +10,8 @@
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
 - Last known deployed version: `01aa3b23-5984-41ad-a30a-02908f1ffb37`.
-- Expected test count: 38.
-- The current working tree contains the deployed feature work but is not clean/fully committed. Preserve unrelated changes and `.dev.vars.swp`; do not claim changes are committed.
+- Expected test count: 48.
+- Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
 
@@ -19,6 +19,7 @@
 - `MAGENTO_ORDER_UPDATES_ENABLED=true`.
 - `CUSTOMER_EMAIL_ENABLED=true`.
 - `HOLD_ACTION_MODE=live`.
+- `CUSTOMER_HISTORY_EXEMPTION_MONTHS=6` (positive whole calendar months; missing or invalid values default to 12).
 - `LOCAL_RUN_DIRECT=false`; `/run` queues a Workflow.
 - VWU production scanning, Magento holds, verification-case creation, Slack alerts, and customer emails were verified working after the Cloudflare skip rule was expanded to allow authenticated POST requests.
 - Four verified production orders (`000574263`, `000574269`, `000574275`, and `000574302`) completed the hold/Slack/email/queue flow. `000574302` was later released and its case marked approved because of a false-positive ZIP/state comparison.
@@ -62,9 +63,14 @@
 - Hold threshold: 2 matched non-required rules unless overridden per site.
 - No current rule is required.
 - Active rules:
+  - Registered-customer completed-order-history exemption.
+    - Skips all remaining fraud rules when the customer has a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order.
+    - Uses Magento `customer_id` only; guest-email history does not qualify.
+    - The Magento history query returns both the oldest completed order and the total completed-order count.
+    - Lookup failures are logged and normal fraud evaluation continues.
   - Billing/shipping address mismatch.
-    - Queries Magento order history only when addresses differ.
-    - Suppressed when the customer has at least 10 completed orders before the current order.
+    - Reuses the completed-order-history result.
+    - Suppressed when the registered customer has at least 10 completed orders before the current order.
   - Account age under 24 hours.
   - Two or more orders from the same customer or IP within one hour.
   - Order total at least $150.
@@ -126,7 +132,7 @@ Run before deploy:
 npm run verify
 ```
 
-Expected: 38 tests, TypeScript success, and Wrangler dry-run success.
+Expected: 48 tests, TypeScript success, and Wrangler dry-run success.
 
 Deploy:
 

@@ -5,6 +5,7 @@ export interface Env {
   EMAIL?: SendEmail;
   MAGENTO_SITES_JSON: string;
   DEFAULT_HOLD_THRESHOLD?: string;
+  CUSTOMER_HISTORY_EXEMPTION_MONTHS?: string;
   MANUAL_RUN_TOKEN_ENV?: string;
   HOLD_ACTION_MODE?: string;
   FRAUD_SCAN_ENABLED?: string;
@@ -119,13 +120,24 @@ export interface OrderSignal {
   totalQty: number;
 }
 
+export interface CompletedOrderHistory {
+  totalCount: number;
+  oldestCompletedOrderCreatedAt: string | null;
+}
+
+export type CompletedOrderHistoryLookup =
+  | { status: "available"; history: CompletedOrderHistory }
+  | { status: "not_applicable" }
+  | { status: "unavailable" };
+
 export interface RuleContext {
   site: SiteConfig;
   db: D1Database;
   now: Date;
   signal: OrderSignal;
   customer: MagentoCustomer | null;
-  getCompletedOrderCount?: () => Promise<number>;
+  completedOrderHistory?: CompletedOrderHistoryLookup;
+  customerHistoryExemptionMonths: number;
 }
 
 export interface RuleResult {
@@ -141,6 +153,7 @@ export interface FraudRule {
   name: string;
   enabled: boolean;
   required: boolean;
+  effect?: "signal" | "exemption";
   evaluate(order: MagentoOrder, context: RuleContext): Promise<Omit<RuleResult, "ruleId" | "ruleName" | "required">>;
 }
 

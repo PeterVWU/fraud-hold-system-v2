@@ -15,6 +15,58 @@ import { stateForUsZip } from "./zipState";
 
 export const INITIAL_RULES: FraudRule[] = [
   {
+    id: "completed_order_older_than_exemption_threshold",
+    name: "Customer has a completed order older than the configured exemption threshold",
+    enabled: true,
+    required: false,
+    effect: "exemption",
+    async evaluate(order, context) {
+      const lookup = context.completedOrderHistory ?? { status: "not_applicable" };
+      const orderCreatedMs = parseMagentoDateMs(order.created_at);
+      if (lookup.status !== "available") {
+        return {
+          matched: false,
+          evidence: {
+            customerId: order.customer_id ?? null,
+            historyLookupStatus: lookup.status,
+            reason: lookup.status === "not_applicable" ? "registered customer_id unavailable" : "history lookup unavailable"
+          }
+        };
+      }
+
+      const oldestCompletedOrderCreatedAt = lookup.history.oldestCompletedOrderCreatedAt;
+      const oldestCompletedOrderCreatedMs = oldestCompletedOrderCreatedAt
+        ? parseMagentoDateMs(oldestCompletedOrderCreatedAt)
+        : Number.NaN;
+      if (!Number.isFinite(orderCreatedMs) || !Number.isFinite(oldestCompletedOrderCreatedMs)) {
+        return {
+          matched: false,
+          evidence: {
+            customerId: order.customer_id ?? null,
+            historyLookupStatus: lookup.status,
+            totalCompletedOrderCount: lookup.history.totalCount,
+            oldestCompletedOrderCreatedAt,
+            reason: "order history date unavailable or invalid"
+          }
+        };
+      }
+
+      const exemptionMonths = context.customerHistoryExemptionMonths;
+      const exemptionCutoff = calendarMonthsBefore(orderCreatedMs, exemptionMonths);
+      return {
+        matched: oldestCompletedOrderCreatedMs <= exemptionCutoff.getTime(),
+        evidence: {
+          customerId: order.customer_id ?? null,
+          historyLookupStatus: lookup.status,
+          totalCompletedOrderCount: lookup.history.totalCount,
+          oldestCompletedOrderCreatedAt,
+          exemptionMonths,
+          exemptionCutoff: exemptionCutoff.toISOString()
+        }
+      };
+    }
+  },
+  {
     id: "billing_shipping_address_mismatch",
     name: "Billing/shipping address mismatch",
     enabled: true,
@@ -24,13 +76,23 @@ export const INITIAL_RULES: FraudRule[] = [
       const shipping = normalizeAddress(getShippingAddress(order));
       const comparable = Boolean(billing && shipping);
       const addressMismatch = comparable && billing !== shipping;
-      const completedOrderCount = addressMismatch
-        ? await (context.getCompletedOrderCount?.() ?? Promise.resolve(0))
-        : 0;
+      const historyAvailable = context.completedOrderHistory?.status === "available";
+      const completedOrderCount =
+        addressMismatch && context.completedOrderHistory?.status === "available"
+          ? context.completedOrderHistory.history.totalCount
+          : 0;
       const establishedCustomer = completedOrderCount >= 10;
       return {
         matched: addressMismatch && !establishedCustomer,
-        evidence: { billing, shipping, comparable, addressMismatch, completedOrderCount, establishedCustomer }
+        evidence: {
+          billing,
+          shipping,
+          comparable,
+          addressMismatch,
+          completedOrderCount,
+          completedOrderHistoryAvailable: historyAvailable,
+          establishedCustomer
+        }
       };
     }
   },
@@ -124,6 +186,18 @@ export const INITIAL_RULES: FraudRule[] = [
     }
   }
 ];
+
+function calendarMonthsBefore(timestampMs: number, months: number): Date {
+  const source = new Date(timestampMs);
+  const targetMonthIndex = source.getUTCFullYear() * 12 + source.getUTCMonth() - months;
+  const targetYear = Math.floor(targetMonthIndex / 12);
+  const month = targetMonthIndex - targetYear * 12;
+  const day = source.getUTCDate();
+  const lastDayOfTargetMonth = new Date(Date.UTC(targetYear, month + 1, 0)).getUTCDate();
+  const cutoff = new Date(source);
+  cutoff.setUTCFullYear(targetYear, month, Math.min(day, lastDayOfTargetMonth));
+  return cutoff;
+}
 
 export function findCustomerCreatedAt(order: MagentoOrder, customer: MagentoCustomer | null = null): string | null {
   if (typeof customer?.created_at === "string" && customer.created_at.trim()) {

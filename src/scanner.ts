@@ -18,7 +18,14 @@ import { sendVerificationEmail } from "./email";
 import { buildOrderSignal, formatMagentoDate, getOrderCreatedAt, getOrderEntityId, parseMagentoDateMs } from "./normalizers";
 import { evaluateFraudRules, formatFraudComment } from "./ruleEngine";
 import { sendSlackHoldAlert } from "./slack";
-import type { Env, MagentoCustomer, MagentoOrder, RunStats, SiteConfig } from "./types";
+import type {
+  CompletedOrderHistoryLookup,
+  Env,
+  MagentoCustomer,
+  MagentoOrder,
+  RunStats,
+  SiteConfig
+} from "./types";
 import { createVerificationCaseForHold } from "./verification";
 
 const PAGE_SIZE = 100;
@@ -171,14 +178,16 @@ export async function reviewOrder(
   existingReviewId: string | null = null
 ): Promise<void> {
   const signal = await buildOrderSignal(order, site);
-  const customer = await fetchCustomerIfAvailable(client, order);
+  const [customer, completedOrderHistory] = await Promise.all([
+    fetchCustomerIfAvailable(client, order),
+    fetchCompletedOrderHistoryIfAvailable(client, site, order)
+  ]);
   const decision = await evaluateFraudRules(env, site, order, {
     db: env.DB,
     now: scheduledAt,
     signal,
     customer,
-    getCompletedOrderCount: () =>
-      order.customer_id ? client.countCompletedOrders(order.customer_id, order.created_at) : Promise.resolve(0)
+    completedOrderHistory
   });
   const reviewedAt = new Date().toISOString();
   const reviewId = existingReviewId ?? crypto.randomUUID();
@@ -294,6 +303,35 @@ async function fetchCustomerIfAvailable(client: MagentoClient, order: MagentoOrd
     return await client.getCustomer(order.customer_id);
   } catch {
     return null;
+  }
+}
+
+async function fetchCompletedOrderHistoryIfAvailable(
+  client: MagentoClient,
+  site: SiteConfig,
+  order: MagentoOrder
+): Promise<CompletedOrderHistoryLookup> {
+  if (!order.customer_id) {
+    return { status: "not_applicable" };
+  }
+
+  try {
+    return {
+      status: "available",
+      history: await client.getCompletedOrderHistory(order.customer_id, order.created_at)
+    };
+  } catch (error) {
+    console.error(
+      JSON.stringify({
+        event: "completed_order_history_lookup_failed",
+        siteId: site.id,
+        orderId: getOrderEntityId(order),
+        incrementId: order.increment_id ?? null,
+        customerId: order.customer_id,
+        error: errorToString(error)
+      })
+    );
+    return { status: "unavailable" };
   }
 }
 

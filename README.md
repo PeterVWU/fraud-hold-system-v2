@@ -9,6 +9,7 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Magento REST is used for order search, order detail, hold, status, and internal comments.
 - Rules live in `src/rules.ts`; each rule has an `id`, `name`, `enabled`, `required`, and `evaluate` function.
 - The hold threshold is 2 matched non-required rules. Required-rule support is built in but no current rule is required.
+- Registered customers with sufficiently old completed-order history bypass the remaining fraud rules; `CUSTOMER_HISTORY_EXEMPTION_MONTHS` controls the calendar-month threshold and defaults to 12.
 - Magento writes require both `MAGENTO_ORDER_UPDATES_ENABLED=true` and `HOLD_ACTION_MODE=live`.
 - Customer verification email requires `CUSTOMER_EMAIL_ENABLED=true`.
 - Scheduled, manual, and latest-order scans require `FRAUD_SCAN_ENABLED=true`.
@@ -25,7 +26,7 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - D1 database: `fraud_hold_system`
 - Schedule: every 5 minutes
 - Last documented deployed version: `01aa3b23-5984-41ad-a30a-02908f1ffb37`
-- Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live`.
+- Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=6`.
 - Misthub remains disabled at the site level. Staging is enabled but its deployed scans fail at origin nginx Basic Auth; this failure is isolated from VWU.
 
 ## Configure
@@ -47,6 +48,7 @@ npx wrangler secret put STAFF_SESSION_SECRET
 
 4. Update `MAGENTO_SITES_JSON` in `wrangler.jsonc` for each Magento site. Add one object per site with a unique `id`, `baseUrl`, `storeCode`, `accessTokenEnv`, optional `adminBaseUrl`, optional `paymentFingerprintPaths`, and optional `scanIntervalMinutes`. Scheduled scans default to the last 5-minute interval when no cursor exists.
 5. Set `SLACK_CHANNEL_ID=C0BBH9RE3GV` for the `fraud-hold-system` Slack channel. `SLACK_BOT_TOKEN` is preferred for channel posting; `SLACK_WEBHOOK_URL` remains supported as a fallback.
+6. Set `CUSTOMER_HISTORY_EXEMPTION_MONTHS` to a positive whole number of calendar months. Missing, zero, fractional, and invalid values safely fall back to 12.
 
 ## Verification Portal
 
@@ -60,7 +62,7 @@ When an order reaches the fraud threshold, live mode first places an eligible or
 - Both Magento actions are blocked unless Magento updates are enabled. Completed cases hide the action buttons and display a result message.
 - Queue rows and case pages include links to open the exact order in Magento in a new tab.
 - When email is disabled, staff can use **Open customer upload page** to test the customer flow without contacting anyone.
-- `/health` reports the effective `magentoUpdatesEnabled` and `customerEmailEnabled` values.
+- `/health` reports the effective `magentoUpdatesEnabled`, `customerEmailEnabled`, and `customerHistoryExemptionMonths` values.
 
 Required staff credentials are secrets and must not be committed:
 
@@ -145,6 +147,7 @@ Magento admin: Open order
 
 The active rules are:
 
+- Registered customers with a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order are exempted from the remaining fraud rules. The setting defaults to 12 when omitted or invalid. The exemption uses Magento customer ID only; guest-email history does not qualify.
 - Billing/shipping address mismatch. This signal is suppressed for established customers with at least 10 completed Magento orders before the current order.
 - Account age under 24 hours.
 - Two or more orders from the same customer or IP within one hour.

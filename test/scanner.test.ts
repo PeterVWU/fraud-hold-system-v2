@@ -50,7 +50,10 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
-      countCompletedOrders: vi.fn().mockResolvedValue(0),
+      getCompletedOrderHistory: vi.fn().mockResolvedValue({
+        totalCount: 0,
+        oldestCompletedOrderCreatedAt: null
+      }),
       holdOrder: vi.fn().mockResolvedValue(true),
       unholdOrder: vi.fn(),
       getOrderStatus: vi.fn().mockResolvedValue("holded"),
@@ -91,12 +94,94 @@ describe("scanner hold notifications", () => {
     expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 1, holdsSucceeded: 1 });
   });
 
+  it("records an old-customer exemption without hold notifications", async () => {
+    const client = {
+      listOrders: vi.fn(),
+      getOrder: vi.fn(),
+      getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2024-01-01 00:00:00" }),
+      getCompletedOrderHistory: vi.fn().mockResolvedValue({
+        totalCount: 1,
+        oldestCompletedOrderCreatedAt: "2025-06-18 11:30:00"
+      }),
+      holdOrder: vi.fn(),
+      unholdOrder: vi.fn(),
+      getOrderStatus: vi.fn(),
+      addOrderComment: vi.fn(),
+      cancelOrder: vi.fn(),
+      listInvoices: vi.fn(),
+      refundInvoiceOffline: vi.fn()
+    };
+    const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+
+    await reviewOrder(env(), site(), client, suspiciousOrder(), new Date("2026-06-18T12:00:00Z"), stats);
+
+    expect(client.getCompletedOrderHistory).toHaveBeenCalledWith(10, "2026-06-18 11:30:00");
+    expect(client.holdOrder).not.toHaveBeenCalled();
+    expect(client.addOrderComment).not.toHaveBeenCalled();
+    expect(sendSlackHoldAlert).not.toHaveBeenCalled();
+    expect(createVerificationCaseForHold).not.toHaveBeenCalled();
+    expect(sendVerificationEmail).not.toHaveBeenCalled();
+    expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 0, holdsSucceeded: 0 });
+  });
+
+  it("continues normal fraud evaluation when completed-order history fails", async () => {
+    const client = {
+      listOrders: vi.fn(),
+      getOrder: vi.fn(),
+      getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      getCompletedOrderHistory: vi.fn().mockRejectedValue(new Error("history unavailable")),
+      holdOrder: vi.fn().mockResolvedValue(true),
+      unholdOrder: vi.fn(),
+      getOrderStatus: vi.fn().mockResolvedValue("holded"),
+      addOrderComment: vi.fn().mockResolvedValue(true),
+      cancelOrder: vi.fn(),
+      listInvoices: vi.fn(),
+      refundInvoiceOffline: vi.fn()
+    };
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+
+    await reviewOrder(env(), site(), client, suspiciousOrder(), new Date("2026-06-18T12:00:00Z"), stats);
+
+    expect(client.holdOrder).toHaveBeenCalledWith(9001);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("completed_order_history_lookup_failed"));
+    expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 1, holdsSucceeded: 1 });
+    errorSpy.mockRestore();
+  });
+
+  it("does not use guest email history for the exemption", async () => {
+    const client = {
+      listOrders: vi.fn(),
+      getOrder: vi.fn(),
+      getCustomer: vi.fn(),
+      getCompletedOrderHistory: vi.fn(),
+      holdOrder: vi.fn().mockResolvedValue(true),
+      unholdOrder: vi.fn(),
+      getOrderStatus: vi.fn().mockResolvedValue("holded"),
+      addOrderComment: vi.fn().mockResolvedValue(true),
+      cancelOrder: vi.fn(),
+      listInvoices: vi.fn(),
+      refundInvoiceOffline: vi.fn()
+    };
+    const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+    const guestOrder = { ...suspiciousOrder(), customer_id: undefined, customer_is_guest: true };
+
+    await reviewOrder(env(), site(), client, guestOrder, new Date("2026-06-18T12:00:00Z"), stats);
+
+    expect(client.getCustomer).not.toHaveBeenCalled();
+    expect(client.getCompletedOrderHistory).not.toHaveBeenCalled();
+    expect(client.holdOrder).toHaveBeenCalledWith(9001);
+  });
+
   it("does not call Magento hold for completed suspicious orders", async () => {
     const client = {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
-      countCompletedOrders: vi.fn().mockResolvedValue(0),
+      getCompletedOrderHistory: vi.fn().mockResolvedValue({
+        totalCount: 0,
+        oldestCompletedOrderCreatedAt: null
+      }),
       holdOrder: vi.fn(),
       unholdOrder: vi.fn(),
       getOrderStatus: vi.fn(),
@@ -127,7 +212,10 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
-      countCompletedOrders: vi.fn().mockResolvedValue(0),
+      getCompletedOrderHistory: vi.fn().mockResolvedValue({
+        totalCount: 0,
+        oldestCompletedOrderCreatedAt: null
+      }),
       holdOrder: vi.fn(),
       unholdOrder: vi.fn(),
       getOrderStatus: vi.fn(),

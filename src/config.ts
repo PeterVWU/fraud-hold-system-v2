@@ -42,6 +42,11 @@ export function getHoldThreshold(env: Env, site: SiteConfig): number {
   return Number.isFinite(fallback) && fallback > 0 ? fallback : 2;
 }
 
+export function getCustomerHistoryExemptionMonths(env: Env): number {
+  const configured = Number(env.CUSTOMER_HISTORY_EXEMPTION_MONTHS);
+  return Number.isInteger(configured) && configured > 0 ? configured : 12;
+}
+
 export function getCursorOverlapMinutes(site: SiteConfig): number {
   return site.cursorOverlapMinutes ?? 10;
 }

@@ -1,6 +1,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { sendVerificationEmail, sendVerificationTestEmail } from "./email";
-import { isCustomerEmailEnabled, isFraudScanEnabled, isMagentoOrderUpdatesEnabled } from "./config";
+import {
+  getCustomerHistoryExemptionMonths,
+  isCustomerEmailEnabled,
+  isFraudScanEnabled,
+  isMagentoOrderUpdatesEnabled
+} from "./config";
 import { buildMagentoAdminOrderUrl } from "./magentoAdmin";
 import { html, redirect, renderCustomerUploadPage, renderStaffCase, renderStaffList, renderStaffLogin } from "./pages";
 import { approveVerificationCase, declineVerificationCase } from "./reviewActions";
@@ -344,11 +349,17 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
 
 function getCapabilities(
   env: Env
-): { fraudScanEnabled: boolean; magentoUpdatesEnabled: boolean; customerEmailEnabled: boolean } {
+): {
+  fraudScanEnabled: boolean;
+  magentoUpdatesEnabled: boolean;
+  customerEmailEnabled: boolean;
+  customerHistoryExemptionMonths: number;
+} {
   return {
     fraudScanEnabled: isFraudScanEnabled(env),
     magentoUpdatesEnabled: isMagentoOrderUpdatesEnabled(env),
-    customerEmailEnabled: isCustomerEmailEnabled(env)
+    customerEmailEnabled: isCustomerEmailEnabled(env),
+    customerHistoryExemptionMonths: getCustomerHistoryExemptionMonths(env)
   };
 }
 

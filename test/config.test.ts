@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  getCustomerHistoryExemptionMonths,
   getHoldActionMode,
   isCustomerEmailEnabled,
   isFraudScanEnabled,
@@ -29,5 +30,18 @@ describe("production safety switches", () => {
     expect(isMagentoOrderUpdatesEnabled(env)).toBe(true);
     expect(isCustomerEmailEnabled(env)).toBe(true);
     expect(getHoldActionMode(env)).toBe("live");
+  });
+});
+
+describe("customer history exemption threshold", () => {
+  it("defaults to 12 months when the setting is absent or invalid", () => {
+    expect(getCustomerHistoryExemptionMonths({} as Env)).toBe(12);
+    expect(getCustomerHistoryExemptionMonths({ CUSTOMER_HISTORY_EXEMPTION_MONTHS: "0" } as Env)).toBe(12);
+    expect(getCustomerHistoryExemptionMonths({ CUSTOMER_HISTORY_EXEMPTION_MONTHS: "6.5" } as Env)).toBe(12);
+    expect(getCustomerHistoryExemptionMonths({ CUSTOMER_HISTORY_EXEMPTION_MONTHS: "invalid" } as Env)).toBe(12);
+  });
+
+  it("accepts a positive whole number of months", () => {
+    expect(getCustomerHistoryExemptionMonths({ CUSTOMER_HISTORY_EXEMPTION_MONTHS: "6" } as Env)).toBe(6);
   });
 });
