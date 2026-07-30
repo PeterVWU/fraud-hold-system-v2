@@ -6,8 +6,6 @@ import {
   getByPath,
   getShippingAddress,
   normalizeAddress,
-  normalizeName,
-  normalizePhone,
   normalizeWhitespace,
   parseMagentoDateMs,
   parseNumber
@@ -21,43 +19,18 @@ export const INITIAL_RULES: FraudRule[] = [
     name: "Billing/shipping address mismatch",
     enabled: true,
     required: false,
-    async evaluate(order) {
+    async evaluate(order, context) {
       const billing = normalizeAddress(order.billing_address);
       const shipping = normalizeAddress(getShippingAddress(order));
       const comparable = Boolean(billing && shipping);
+      const addressMismatch = comparable && billing !== shipping;
+      const completedOrderCount = addressMismatch
+        ? await (context.getCompletedOrderCount?.() ?? Promise.resolve(0))
+        : 0;
+      const establishedCustomer = completedOrderCount >= 10;
       return {
-        matched: comparable && billing !== shipping,
-        evidence: { billing, shipping, comparable }
-      };
-    }
-  },
-  {
-    id: "billing_shipping_phone_mismatch",
-    name: "Billing phone differs from shipping phone",
-    enabled: true,
-    required: false,
-    async evaluate(order) {
-      const billingPhone = normalizePhone(order.billing_address?.telephone);
-      const shippingPhone = normalizePhone(getShippingAddress(order)?.telephone);
-      const comparable = Boolean(billingPhone && shippingPhone);
-      return {
-        matched: comparable && billingPhone !== shippingPhone,
-        evidence: { billingPhone, shippingPhone, comparable }
-      };
-    }
-  },
-  {
-    id: "billing_shipping_name_mismatch",
-    name: "Billing name differs from shipping name",
-    enabled: true,
-    required: false,
-    async evaluate(order) {
-      const billingName = normalizeName(order.billing_address);
-      const shippingName = normalizeName(getShippingAddress(order));
-      const comparable = Boolean(billingName && shippingName);
-      return {
-        matched: comparable && billingName !== shippingName,
-        evidence: { billingName, shippingName, comparable }
+        matched: addressMismatch && !establishedCustomer,
+        evidence: { billing, shipping, comparable, addressMismatch, completedOrderCount, establishedCustomer }
       };
     }
   },
@@ -109,18 +82,6 @@ export const INITIAL_RULES: FraudRule[] = [
       return {
         matched: grandTotal >= 150,
         evidence: { grandTotal, threshold: 150 }
-      };
-    }
-  },
-  {
-    id: "total_quantity_gte_10",
-    name: "Total quantity >= 10",
-    enabled: true,
-    required: false,
-    async evaluate(order, context) {
-      return {
-        matched: context.signal.totalQty >= 10,
-        evidence: { totalQty: context.signal.totalQty, threshold: 10 }
       };
     }
   },

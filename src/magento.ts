@@ -1,22 +1,38 @@
 import { normalizeBaseUrl } from "./config";
-import type { MagentoCustomer, MagentoOrder, SiteConfig } from "./types";
+import type { MagentoCustomer, MagentoInvoice, MagentoOrder, SiteConfig } from "./types";
 
 export interface MagentoClient {
   listOrders(params: ListOrdersParams): Promise<MagentoOrder[]>;
   getOrder(orderId: number): Promise<MagentoOrder>;
   getCustomer(customerId: number): Promise<MagentoCustomer>;
+  countCompletedOrders(customerId: number, createdBefore: string): Promise<number>;
+  listInvoices(orderId: number): Promise<MagentoInvoice[]>;
   holdOrder(orderId: number): Promise<boolean>;
+  unholdOrder(orderId: number): Promise<boolean>;
+  cancelOrder(orderId: number): Promise<boolean>;
   getOrderStatus(orderId: number): Promise<string>;
   addOrderComment(orderId: number, status: string | null, comment: string): Promise<boolean>;
+  refundInvoiceOffline(invoiceId: number, input: MagentoRefundInput): Promise<number>;
 }
 
 export interface ListOrdersParams {
   createdAtGte: string;
   pageSize: number;
   currentPage: number;
+  sortDirection?: "ASC" | "DESC";
 }
 
-export function createMagentoClient(site: SiteConfig, accessToken: string): MagentoClient {
+export interface MagentoRefundInput {
+  items: Array<{ order_item_id: number; qty: number }>;
+  comment: string;
+  shippingAmount?: number;
+}
+
+export function createMagentoClient(
+  site: SiteConfig,
+  accessToken: string,
+  requestHeaders: Record<string, string> = {}
+): MagentoClient {
   const storePath = site.storeCode ? `/${encodeURIComponent(site.storeCode)}` : "";
   const base = `${normalizeBaseUrl(site.baseUrl)}/rest${storePath}/V1`;
 
@@ -28,6 +44,7 @@ export function createMagentoClient(site: SiteConfig, accessToken: string): Mage
         "Content-Type": "application/json",
         "User-Agent": "FraudHoldSystem/1.0",
         Authorization: `Bearer ${accessToken}`,
+        ...requestHeaders,
         ...(init.headers ?? {})
       }
     });
@@ -47,7 +64,7 @@ export function createMagentoClient(site: SiteConfig, accessToken: string): Mage
         "searchCriteria[filterGroups][0][filters][0][value]": params.createdAtGte,
         "searchCriteria[filterGroups][0][filters][0][conditionType]": "gteq",
         "searchCriteria[sortOrders][0][field]": "created_at",
-        "searchCriteria[sortOrders][0][direction]": "ASC",
+        "searchCriteria[sortOrders][0][direction]": params.sortDirection ?? "ASC",
         "searchCriteria[pageSize]": String(params.pageSize),
         "searchCriteria[currentPage]": String(params.currentPage)
       });
@@ -63,8 +80,44 @@ export function createMagentoClient(site: SiteConfig, accessToken: string): Mage
       return request<MagentoCustomer>(`/customers/${customerId}`);
     },
 
+    async countCompletedOrders(customerId, createdBefore) {
+      const query = new URLSearchParams({
+        "searchCriteria[filterGroups][0][filters][0][field]": "customer_id",
+        "searchCriteria[filterGroups][0][filters][0][value]": String(customerId),
+        "searchCriteria[filterGroups][0][filters][0][conditionType]": "eq",
+        "searchCriteria[filterGroups][1][filters][0][field]": "status",
+        "searchCriteria[filterGroups][1][filters][0][value]": "complete",
+        "searchCriteria[filterGroups][1][filters][0][conditionType]": "eq",
+        "searchCriteria[filterGroups][2][filters][0][field]": "created_at",
+        "searchCriteria[filterGroups][2][filters][0][value]": createdBefore,
+        "searchCriteria[filterGroups][2][filters][0][conditionType]": "lt",
+        "searchCriteria[pageSize]": "1",
+        "searchCriteria[currentPage]": "1"
+      });
+      const result = await request<{ total_count?: number }>(`/orders?${query.toString()}`);
+      return Number(result.total_count ?? 0);
+    },
+
+    async listInvoices(orderId) {
+      const query = new URLSearchParams({
+        "searchCriteria[filterGroups][0][filters][0][field]": "order_id",
+        "searchCriteria[filterGroups][0][filters][0][value]": String(orderId),
+        "searchCriteria[filterGroups][0][filters][0][conditionType]": "eq"
+      });
+      const result = await request<{ items?: MagentoInvoice[] }>(`/invoices?${query.toString()}`);
+      return result.items ?? [];
+    },
+
     holdOrder(orderId) {
       return request<boolean>(`/orders/${orderId}/hold`, { method: "POST" });
+    },
+
+    unholdOrder(orderId) {
+      return request<boolean>(`/orders/${orderId}/unhold`, { method: "POST" });
+    },
+
+    cancelOrder(orderId) {
+      return request<boolean>(`/orders/${orderId}/cancel`, { method: "POST" });
     },
 
     getOrderStatus(orderId) {
@@ -80,6 +133,25 @@ export function createMagentoClient(site: SiteConfig, accessToken: string): Mage
             status: status ?? undefined,
             is_customer_notified: 0,
             is_visible_on_front: 0
+          }
+        })
+      });
+    },
+
+    refundInvoiceOffline(invoiceId, input) {
+      return request<number>(`/invoice/${invoiceId}/refund`, {
+        method: "POST",
+        body: JSON.stringify({
+          items: input.items,
+          isOnline: false,
+          notify: false,
+          appendComment: true,
+          comment: {
+            comment: input.comment,
+            is_visible_on_front: 0
+          },
+          arguments: {
+            shipping_amount: input.shippingAmount ?? 0
           }
         })
       });

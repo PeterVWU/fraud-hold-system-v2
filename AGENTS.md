@@ -2,61 +2,123 @@
 
 ## Current State
 
-- Project: Cloudflare Worker + Workflow for Magento fraud hold automation.
-- Worker name: `fraud-hold-system-v2`.
+- Project: Cloudflare Worker + Workflow for Magento fraud-hold and customer-verification automation.
+- Worker: `fraud-hold-system-v2`.
 - Live URL: `https://fraud-hold-system-v2.info-ba2.workers.dev`.
-- D1 database: `fraud_hold_system`.
+- D1: `fraud_hold_system`.
+- R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
-- Last known deployed version after interval-window change: `778185fc-959e-4202-87bc-cc7b974952de`.
-- Current branch has the deployed source committed through `a92ce52 Limit scheduled scans to interval window`.
+- Last known deployed version: `01aa3b23-5984-41ad-a30a-02908f1ffb37`.
+- Expected test count: 38.
+- The current working tree contains the deployed feature work but is not clean/fully committed. Preserve unrelated changes and `.dev.vars.swp`; do not claim changes are committed.
 
-## Active Behavior
+## Production State
 
-- Scheduled scans run every 5 minutes.
-- Each enabled site scans only the last configured interval when no cursor exists.
-- Existing cursors resume from `site_cursors.last_success_created_at`.
-- Current config sets `scanIntervalMinutes: 5` and `cursorOverlapMinutes: 0`.
-- Rules are hard-coded in `src/rules.ts`; each rule has `id`, `name`, `enabled`, `required`, and `evaluate`.
-- Hold threshold is 2 matched non-required rules unless overridden per site.
-- Required-rule support exists, but no current rule is required.
-- D1 stores run logs, site cursors, order reviews, per-rule evidence, and order signals.
-- Slack alerts are sent only after Magento hold succeeds.
-- Slack messages include the original order details plus an admin order link when `adminBaseUrl` is set.
+- `FRAUD_SCAN_ENABLED=true`.
+- `MAGENTO_ORDER_UPDATES_ENABLED=true`.
+- `CUSTOMER_EMAIL_ENABLED=true`.
+- `HOLD_ACTION_MODE=live`.
+- `LOCAL_RUN_DIRECT=false`; `/run` queues a Workflow.
+- VWU production scanning, Magento holds, verification-case creation, Slack alerts, and customer emails were verified working after the Cloudflare skip rule was expanded to allow authenticated POST requests.
+- Four verified production orders (`000574263`, `000574269`, `000574275`, and `000574302`) completed the hold/Slack/email/queue flow. `000574302` was later released and its case marked approved because of a false-positive ZIP/state comparison.
 
 ## Sites
 
-- `staging`
-  - Enabled: true.
-  - Base URL: `https://staging.vapewholesaleusa.com`.
-  - Admin base URL: `https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf`.
-  - Secret name: `MAGENTO_MAIN_ACCESS_TOKEN`.
-  - Current issue: staging Magento REST is behind nginx basic auth. Cloudflare WAF 403 was bypassed, but origin still returns nginx 401 unless REST paths are exempted.
+### `vwu`
 
-- `misthub`
-  - Enabled: false.
-  - Base URL: `https://misthub.com`.
-  - Admin base URL: `https://sdhds5.misthub.com/Gi3ygQ6cafEK7hZf6uzf`.
-  - Secret name: `MAGENTO_MISTHUB_ACCESS_TOKEN`.
-  - Correct Magento REST base is `/rest/V1`, so config uses `storeCode: ""`.
-  - Misthub was disabled after a live test run held multiple orders. Do not re-enable without explicit user approval.
+- Name: `vapewholesaleusa.com`.
+- Enabled: true.
+- Base URL: `https://vapewholesaleusa.com`.
+- REST base: `/rest/V1` (`storeCode: ""`).
+- Access-token secret: `MAGENTO_MAIN_ACCESS_TOKEN`.
+- Extra perimeter header:
+  - name: `x-vwu-agent-auth`
+  - value secret: `MAGENTO_VWU_AGENT_AUTH`
+- Cloudflare must skip relevant security checks for `/rest/V1/` requests carrying the correct secret header. Do not restrict the rule to GET: hold, unhold, comments, approve, and decline use POST.
 
-## Operational Notes
+### `staging-vwu`
 
-- Do not commit secret values. Only secret names belong in config/docs.
-- Worker secrets currently expected:
-  - `MAGENTO_MAIN_ACCESS_TOKEN`
-  - `MAGENTO_MISTHUB_ACCESS_TOKEN`
-  - `MANUAL_RUN_TOKEN`
-  - `SLACK_BOT_TOKEN`
-- `SLACK_CHANNEL_ID` is configured as `C0BBH9RE3GV`.
-- `HOLD_ACTION_MODE` is currently `live`.
-- `LOCAL_RUN_DIRECT` is currently `false`, so `/run` queues a Workflow instance.
-- One site failure should not stop other sites; `scanAllSites` catches per-site errors.
-- Non-holdable statuses such as `complete` are recorded as suspicious but are not sent to Magento hold.
-- Unexpected Magento hold failures are recorded and do not abort the remaining order scan.
+- Name: `Staging VWU`.
+- Enabled: true.
+- Base URL: `https://staging.vapewholesaleusa.com`.
+- REST base: `/rest/default/V1`.
+- Access-token secret: `MAGENTO_STAGING_ACCESS_TOKEN`.
+- Known production blocker: requests from the deployed Worker receive an nginx HTML `401 Authorization Required` before reaching Magento. The same token works locally. Staging `/rest/` must be exempted from nginx Basic Auth or protected with a separate custom header.
+- Site failures are isolated, so this recurring staging failure does not stop VWU.
 
-## Verification
+### `misthub`
+
+- Name: `misthub.com`.
+- Enabled: false.
+- Base URL: `https://misthub.com`.
+- REST base: `/rest/V1` (`storeCode: ""`).
+- Access-token secret: `MAGENTO_MISTHUB_ACCESS_TOKEN`.
+- Do not re-enable without explicit user approval.
+
+## Fraud Rules
+
+- Rules are hard-coded in `src/rules.ts`.
+- Hold threshold: 2 matched non-required rules unless overridden per site.
+- No current rule is required.
+- Active rules:
+  - Billing/shipping address mismatch.
+    - Queries Magento order history only when addresses differ.
+    - Suppressed when the customer has at least 10 completed orders before the current order.
+  - Account age under 24 hours.
+  - Two or more orders from the same customer or IP within one hour.
+  - Order total at least $150.
+  - ZIP does not match state.
+  - Multiple cards or billing names used by the same customer in one day.
+- Removed rules:
+  - Total quantity at least 10.
+  - Billing/shipping phone mismatch.
+  - Billing/shipping name mismatch.
+- Known ZIP issue: Magento may provide a full state name such as `NEBRASKA`, while ZIP lookup returns `NE`. Full-name-to-abbreviation normalization has not yet been implemented. This caused the false hold for `000574302`.
+
+## Hold and Verification Flow
+
+- D1 stores run logs, cursors, reviews, rule evidence, reusable signals, verification cases, email attempts, documents, and staff actions.
+- An eligible suspicious order is added to the staff queue only after Magento hold succeeds.
+- After a successful hold:
+  1. Create a verification case and expiring hashed customer token.
+  2. Send the per-site verification email when enabled.
+  3. Send Slack only after Magento hold succeeds.
+- Staff queue: `/staff`; login: `/staff/login`.
+- Queue and case pages include Magento admin links opening in a new tab.
+- Approve releases the Magento hold and expects status `processing`; completed cases hide further action buttons and show a success message.
+- Decline is not considered production-ready:
+  - Intended flow: unhold, create an offline invoice credit memo, then accept Magento `closed` or `canceled`; staff refunds the payment manually in Authorize.net.
+  - Staging Magento returns a generic 500 from `/V1/invoice/{invoiceId}/refund`, likely inside the Rootways Authorize CIM module or another observer.
+  - Failed credit-memo attempts now try to restore the Magento hold.
+  - The user explicitly chose to leave Decline unresolved for later.
+
+## Safety and Manual Runs
+
+- `/run` requires `MANUAL_RUN_TOKEN`; it queues the Workflow when `LOCAL_RUN_DIRECT=false`.
+- `/run-latest` requires scanning enabled.
+- With Magento updates enabled, `/run-latest` requires an explicit `site` query parameter.
+- `/run-latest` always requires customer email to be disabled.
+- Site scans are isolated; unexpected Magento failures are recorded and do not abort remaining orders/sites.
+- Non-holdable statuses are recorded as suspicious but are not changed.
+- Clearing verification cases does not clear reviews. A previously reviewed/held order will not automatically recreate a case unless its review is deliberately reset and the cursor/window includes it.
+
+## Secrets
+
+Never commit secret values. Expected production secret names:
+
+- `MAGENTO_MAIN_ACCESS_TOKEN`
+- `MAGENTO_MISTHUB_ACCESS_TOKEN`
+- `MAGENTO_STAGING_ACCESS_TOKEN`
+- `MAGENTO_VWU_AGENT_AUTH`
+- `MANUAL_RUN_TOKEN`
+- `SLACK_BOT_TOKEN`
+- `STAFF_REVIEW_PASSWORD`
+- `STAFF_SESSION_SECRET`
+
+`SLACK_CHANNEL_ID` is `C0BBH9RE3GV`.
+
+## Verification and Deployment
 
 Run before deploy:
 
@@ -64,29 +126,20 @@ Run before deploy:
 npm run verify
 ```
 
-Expected current test count: 13 tests.
+Expected: 38 tests, TypeScript success, and Wrangler dry-run success.
 
-Useful live checks:
-
-```bash
-curl -fsS https://fraud-hold-system-v2.info-ba2.workers.dev/health
-npx wrangler secret list
-npx wrangler d1 execute fraud_hold_system --remote --command "SELECT site_id, started_at, finished_at, status, pages_fetched, orders_evaluated, holds_attempted, holds_succeeded, substr(error, 1, 180) AS error_summary FROM run_logs ORDER BY started_at DESC LIMIT 10"
-```
-
-## Last Known Live Test Results
-
-- Staging live scan could not evaluate orders because origin nginx returned 401.
-- Misthub was reachable and the corrected `/rest/V1` base worked.
-- A Misthub live run evaluated 104 orders and held 14 orders before the user requested Misthub be stopped.
-- Misthub is now disabled in `wrangler.jsonc` and deployed disabled.
-
-## Deployment
-
-Deploy with:
+Deploy:
 
 ```bash
 npx wrangler deploy --minify
 ```
 
-If a site is being disabled urgently, it is acceptable to deploy the config-only stop before running the full verify suite, then verify afterward.
+Useful live checks:
+
+```bash
+curl -fsS "https://fraud-hold-system-v2.info-ba2.workers.dev/health?check=$(date +%s)"
+npx wrangler secret list
+npx wrangler d1 execute fraud_hold_system --remote --command "SELECT site_id, started_at, finished_at, status, pages_fetched, orders_evaluated, holds_attempted, holds_succeeded, substr(error, 1, 180) AS error_summary FROM run_logs ORDER BY started_at DESC LIMIT 10"
+```
+
+Use a unique health-check query value because stale edge responses were observed previously.

@@ -1,4 +1,5 @@
 import type { FraudDecision, MagentoOrder, SiteConfig } from "./types";
+import { buildMagentoAdminOrderUrl } from "./magentoAdmin";
 
 export interface SlackAlertConfig {
   webhookUrl?: string;
@@ -89,18 +90,10 @@ function buildHoldAlertText(site: SiteConfig, order: MagentoOrder, decision: Fra
     `Rules: ${matched.join(", ")}`
   ];
 
-  const adminUrl = buildAdminOrderUrl(site, order);
+  const adminUrl = buildMagentoAdminOrderUrl(site, order.entity_id);
   if (adminUrl) {
     lines.push(`Magento admin: <${adminUrl}|Open order>`);
   }
 
   return lines.join("\n");
-}
-
-function buildAdminOrderUrl(site: SiteConfig, order: MagentoOrder): string | null {
-  if (!site.adminBaseUrl) {
-    return null;
-  }
-
-  return `${site.adminBaseUrl.replace(/\/+$/, "")}/sales/order/view/order_id/${order.entity_id}/`;
 }

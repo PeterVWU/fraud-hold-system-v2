@@ -19,7 +19,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 13.
+- Current expected unit test count is 38.
 
 ## Local D1 Setup
 
@@ -35,7 +35,7 @@ If Wrangler cannot bind `127.0.0.1` in a sandboxed environment, rerun with the r
 
 Purpose: prove a suspicious staging order is detected and recorded without changing Magento.
 
-Use `HOLD_ACTION_MODE=dry_run` and `LOCAL_RUN_DIRECT=true`.
+Use `FRAUD_SCAN_ENABLED=true`, `MAGENTO_ORDER_UPDATES_ENABLED=false`, `CUSTOMER_EMAIL_ENABLED=false`, and `LOCAL_RUN_DIRECT=true`.
 
 Expected evidence from the verified staging run:
 
@@ -46,16 +46,18 @@ Expected evidence from the verified staging run:
 - Threshold: `2`
 - Hold attempted: `0`
 - Hold error/reason: `dry run: Magento hold skipped`
+- A verification case is created and appears in `/staff`.
+- No Magento write, customer email, or Slack hold alert is attempted.
+- Staff can open the generated customer upload page from the case detail screen.
 - Matched rule evidence:
   - `order_total_gte_150`
-  - `total_quantity_gte_10`
   - `zip_state_mismatch`
 
 ## Staging Magento Live Hold Test
 
 Purpose: prove a suspicious staging order can be updated to hold and sends a Slack alert.
 
-Only run this on a staging order that is safe to modify.
+Only run this on a staging order that is safe to modify. Set `MAGENTO_ORDER_UPDATES_ENABLED=true`, `CUSTOMER_EMAIL_ENABLED=true`, and `HOLD_ACTION_MODE=live`.
 
 Expected evidence from the verified staging run:
 
@@ -163,7 +165,11 @@ rm /tmp/fraud-hold-staging.vars
 - Threshold matching holds only when matched non-required rules reach the configured threshold.
 - Required-rule support exists through each rule's `required` flag.
 - Matched and non-matched rule evidence is stored in D1.
-- Suspicious orders are updated to Magento hold status only in `live` mode.
+- Suspicious orders are updated to Magento only when `MAGENTO_ORDER_UPDATES_ENABLED=true` and `HOLD_ACTION_MODE=live`.
+- Customer email is sent only when `CUSTOMER_EMAIL_ENABLED=true`.
+- Cron, Workflow, manual, and latest-order scans run only when `FRAUD_SCAN_ENABLED=true`.
+- Test mode still creates verification cases without Magento writes or customer contact.
+- Approve, decline/cancel, and order-comment actions are blocked when Magento updates are disabled. Authorize.net refunds are performed manually by staff.
 - Suspicious orders in non-holdable statuses are recorded without a Magento hold API call.
 - Below-threshold orders remain unchanged.
 - Slack alert code is tested for bot-token channel posting, webhook fallback, API errors, and clean skip when Slack is unconfigured.

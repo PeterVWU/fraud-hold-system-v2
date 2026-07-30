@@ -1,4 +1,4 @@
-import { getAccessToken, getCursorOverlapMinutes, getHoldActionMode, getSites } from "./config";
+import { getAccessToken, getCursorOverlapMinutes, getHoldActionMode, getMagentoRequestHeaders, getSites } from "./config";
 import {
   createReview,
   createRunLog,
@@ -14,10 +14,12 @@ import {
   updateSiteCursor
 } from "./db";
 import { createMagentoClient, type MagentoClient } from "./magento";
+import { sendVerificationEmail } from "./email";
 import { buildOrderSignal, formatMagentoDate, getOrderCreatedAt, getOrderEntityId, parseMagentoDateMs } from "./normalizers";
 import { evaluateFraudRules, formatFraudComment } from "./ruleEngine";
 import { sendSlackHoldAlert } from "./slack";
 import type { Env, MagentoCustomer, MagentoOrder, RunStats, SiteConfig } from "./types";
+import { createVerificationCaseForHold } from "./verification";
 
 const PAGE_SIZE = 100;
 const DEFAULT_SCHEDULE_INTERVAL_MINUTES = 5;
@@ -41,13 +43,82 @@ export async function scanAllSites(env: Env, scheduledAt: Date): Promise<RunStat
   return aggregate;
 }
 
+export async function scanLatestOrdersAllSites(
+  env: Env,
+  limit: number,
+  page: number,
+  scannedAt: Date,
+  includeDisabled = false,
+  siteId?: string
+): Promise<RunStats> {
+  const aggregate: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+  const configuredSites = getSites(env, includeDisabled);
+  const sites = siteId ? configuredSites.filter((site) => site.id === siteId) : configuredSites;
+  if (siteId && sites.length === 0) {
+    throw new Error(`Magento site ${siteId} is not configured`);
+  }
+
+  for (const site of sites) {
+    try {
+      const stats = await scanLatestOrders(env, site, limit, page, scannedAt);
+      aggregate.pagesFetched += stats.pagesFetched;
+      aggregate.ordersEvaluated += stats.ordersEvaluated;
+      aggregate.holdsAttempted += stats.holdsAttempted;
+      aggregate.holdsSucceeded += stats.holdsSucceeded;
+    } catch (error) {
+      console.error(`Latest-order fraud scan failed for site ${site.id}`, error);
+    }
+  }
+
+  return aggregate;
+}
+
+async function scanLatestOrders(
+  env: Env,
+  site: SiteConfig,
+  limit: number,
+  page: number,
+  scannedAt: Date
+): Promise<RunStats> {
+  const startedAt = new Date().toISOString();
+  const runLogId = await createRunLog(env.DB, site.id, startedAt);
+  const stats: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+
+  try {
+    const client = createMagentoClient(site, getAccessToken(env, site), getMagentoRequestHeaders(env, site));
+    const newestFirst = await client.listOrders({
+      createdAtGte: "1970-01-01 00:00:00",
+      pageSize: limit,
+      currentPage: page,
+      sortDirection: "DESC"
+    });
+    stats.pagesFetched = 1;
+
+    for (const listOrder of newestFirst.slice().reverse()) {
+      const orderId = getOrderEntityId(listOrder);
+      const existingReview = await getReviewSummary(env.DB, site.id, orderId);
+      if (existingReview && (existingReview.decision === "allow" || existingReview.holdSucceeded)) {
+        continue;
+      }
+      const order = await ensureCompleteOrder(client, listOrder);
+      await reviewOrder(env, site, client, order, scannedAt, stats, existingReview?.id ?? null);
+    }
+
+    await finishRunLog(env.DB, runLogId, new Date().toISOString(), "success", stats, null);
+    return stats;
+  } catch (error) {
+    await finishRunLog(env.DB, runLogId, new Date().toISOString(), "failed", stats, errorToString(error));
+    throw error;
+  }
+}
+
 export async function scanSite(env: Env, site: SiteConfig, scheduledAt: Date): Promise<RunStats> {
   const startedAt = new Date().toISOString();
   const runLogId = await createRunLog(env.DB, site.id, startedAt);
   const stats: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
 
   try {
-    const client = createMagentoClient(site, getAccessToken(env, site));
+    const client = createMagentoClient(site, getAccessToken(env, site), getMagentoRequestHeaders(env, site));
     const createdAtGte = await getScanStart(env.DB, site, scheduledAt);
     let currentPage = 1;
     let newestProcessed: { createdAt: string; orderId: number } | null = null;
@@ -105,7 +176,9 @@ export async function reviewOrder(
     db: env.DB,
     now: scheduledAt,
     signal,
-    customer
+    customer,
+    getCompletedOrderCount: () =>
+      order.customer_id ? client.countCompletedOrders(order.customer_id, order.created_at) : Promise.resolve(0)
   });
   const reviewedAt = new Date().toISOString();
   const reviewId = existingReviewId ?? crypto.randomUUID();
@@ -124,6 +197,7 @@ export async function reviewOrder(
 
   if (decision.decision === "hold" && actionMode === "dry_run") {
     await markHoldSkipped(env.DB, reviewId, order.status ?? null, "dry run: Magento hold skipped");
+    await createAndMaybeEmailVerificationCase(env, site, order, reviewId, reviewedAt);
   } else if (decision.decision === "hold" && isAlreadyHoldStatus(order.status)) {
     await markHoldAlreadySatisfied(env.DB, reviewId, order.status ?? null, actionMode);
   } else if (decision.decision === "hold" && !isHoldableStatus(order.status)) {
@@ -143,6 +217,11 @@ export async function reviewOrder(
       await markHoldResult(env.DB, reviewId, held, statusAfter, held ? null : "Magento returned false", actionMode);
       if (held) {
         stats.holdsSucceeded += 1;
+        try {
+          await createAndMaybeEmailVerificationCase(env, site, order, reviewId, new Date().toISOString());
+        } catch (error) {
+          console.error(`Failed to create/send verification email for review ${reviewId}`, error);
+        }
         const slackResult = await sendSlackHoldAlert(
           {
             webhookUrl: env.SLACK_WEBHOOK_URL,
@@ -163,6 +242,31 @@ export async function reviewOrder(
   }
 
   await recordOrderSignal(env.DB, site, order, signal, reviewedAt);
+}
+
+async function createAndMaybeEmailVerificationCase(
+  env: Env,
+  site: SiteConfig,
+  order: MagentoOrder,
+  reviewId: string,
+  now: string
+): Promise<void> {
+  try {
+    const verification = await createVerificationCaseForHold(env, site, order, reviewId, now);
+    if (verification.created) {
+      await sendVerificationEmail(
+        env,
+        site,
+        order,
+        verification.verificationCase,
+        verification.token,
+        getPublicBaseUrl(env),
+        now
+      );
+    }
+  } catch (error) {
+    console.error(`Failed to create/send verification email for review ${reviewId}`, error);
+  }
 }
 
 export async function getScanStart(db: D1Database, site: SiteConfig, scheduledAt: Date): Promise<string> {
@@ -221,4 +325,8 @@ function isHoldableStatus(status: string | undefined): boolean {
 
 function errorToString(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function getPublicBaseUrl(env: Env): string {
+  return env.PUBLIC_BASE_URL ?? "https://fraud-hold-system-v2.info-ba2.workers.dev";
 }

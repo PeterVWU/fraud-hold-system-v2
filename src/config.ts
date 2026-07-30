@@ -1,6 +1,6 @@
 import type { Env, SiteConfig } from "./types";
 
-export function getSites(env: Env): SiteConfig[] {
+export function getSites(env: Env, includeDisabled = false): SiteConfig[] {
   const raw = env.MAGENTO_SITES_JSON;
   if (!raw) {
     throw new Error("MAGENTO_SITES_JSON is required");
@@ -8,7 +8,7 @@ export function getSites(env: Env): SiteConfig[] {
 
   const parsed = JSON.parse(raw) as SiteConfig[];
   return parsed
-    .filter((site) => site.enabled)
+    .filter((site) => includeDisabled || site.enabled)
     .map((site) => validateSite(site));
 }
 
@@ -18,6 +18,20 @@ export function getAccessToken(env: Env, site: SiteConfig): string {
     throw new Error(`Missing Magento access token secret ${site.accessTokenEnv} for site ${site.id}`);
   }
   return token;
+}
+
+export function getMagentoRequestHeaders(env: Env, site: SiteConfig): Record<string, string> {
+  if (!site.requestAuthHeaderName && !site.requestAuthHeaderValueEnv) {
+    return {};
+  }
+  if (!site.requestAuthHeaderName || !site.requestAuthHeaderValueEnv) {
+    throw new Error(`Magento request auth header is incompletely configured for site ${site.id}`);
+  }
+  const value = env[site.requestAuthHeaderValueEnv];
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`Missing Magento request header secret ${site.requestAuthHeaderValueEnv} for site ${site.id}`);
+  }
+  return { [site.requestAuthHeaderName]: value };
 }
 
 export function getHoldThreshold(env: Env, site: SiteConfig): number {
@@ -33,7 +47,19 @@ export function getCursorOverlapMinutes(site: SiteConfig): number {
 }
 
 export function getHoldActionMode(env: Env): "live" | "dry_run" {
-  return env.HOLD_ACTION_MODE === "dry_run" ? "dry_run" : "live";
+  return isMagentoOrderUpdatesEnabled(env) && env.HOLD_ACTION_MODE !== "dry_run" ? "live" : "dry_run";
+}
+
+export function isMagentoOrderUpdatesEnabled(env: Env): boolean {
+  return env.MAGENTO_ORDER_UPDATES_ENABLED === "true";
+}
+
+export function isCustomerEmailEnabled(env: Env): boolean {
+  return env.CUSTOMER_EMAIL_ENABLED === "true";
+}
+
+export function isFraudScanEnabled(env: Env): boolean {
+  return env.FRAUD_SCAN_ENABLED === "true";
 }
 
 export function normalizeBaseUrl(baseUrl: string): string {
@@ -51,6 +77,19 @@ function validateSite(site: SiteConfig): SiteConfig {
   return {
     ...site,
     baseUrl: normalizeBaseUrl(site.baseUrl),
-    paymentFingerprintPaths: site.paymentFingerprintPaths ?? []
+    paymentFingerprintPaths: site.paymentFingerprintPaths ?? [],
+    authNetTransactionIdPaths: site.authNetTransactionIdPaths ?? [
+      "payment.last_trans_id",
+      "payment.cc_trans_id",
+      "payment.additional_information.transaction_id",
+      "payment.additional_information.authnet_transaction_id",
+      "extension_attributes.authnet_transaction_id"
+    ],
+    authNetCardLast4Paths: site.authNetCardLast4Paths ?? [
+      "payment.cc_last4",
+      "payment.additional_information.cc_last4",
+      "payment.additional_information.card_last4",
+      "extension_attributes.cc_last4"
+    ]
   };
 }

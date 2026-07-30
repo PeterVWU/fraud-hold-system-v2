@@ -6,10 +6,14 @@
   "compatibility_date": "2026-06-18",
   "workers_dev": true,
   "vars": {
-    "MAGENTO_SITES_JSON": "[{\"id\":\"staging\",\"name\":\"Staging Magento\",\"baseUrl\":\"https://staging.vapewholesaleusa.com\",\"adminBaseUrl\":\"https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf\",\"storeCode\":\"default\",\"accessTokenEnv\":\"MAGENTO_MAIN_ACCESS_TOKEN\",\"enabled\":true,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"holdThreshold\":2,\"cursorOverlapMinutes\":0,\"scanIntervalMinutes\":5},{\"id\":\"misthub\",\"name\":\"misthub.com\",\"baseUrl\":\"https://misthub.com\",\"adminBaseUrl\":\"https://sdhds5.misthub.com/Gi3ygQ6cafEK7hZf6uzf\",\"storeCode\":\"\",\"accessTokenEnv\":\"MAGENTO_MISTHUB_ACCESS_TOKEN\",\"enabled\":false,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"holdThreshold\":2,\"cursorOverlapMinutes\":0,\"scanIntervalMinutes\":5}]",
+    "MAGENTO_SITES_JSON": "[{\"id\":\"vwu\",\"name\":\"vapewholesaleusa.com\",\"baseUrl\":\"https://vapewholesaleusa.com\",\"adminBaseUrl\":\"https://x19z7.vapewholesaleusa.com/GAYygQ6cafEK7hZf6uzf\",\"storeCode\":\"\",\"accessTokenEnv\":\"MAGENTO_MAIN_ACCESS_TOKEN\",\"requestAuthHeaderName\":\"x-vwu-agent-auth\",\"requestAuthHeaderValueEnv\":\"MAGENTO_VWU_AGENT_AUTH\",\"enabled\":true,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"verificationEmailFrom\":\"no-reply@vapewholesaleusa.com\",\"verificationEmailReplyTo\":\"support@vapewholesaleusa.com\",\"holdThreshold\":2,\"cursorOverlapMinutes\":0,\"scanIntervalMinutes\":5},{\"id\":\"misthub\",\"name\":\"misthub.com\",\"baseUrl\":\"https://misthub.com\",\"adminBaseUrl\":\"https://sdhds5.misthub.com/Gi3ygQ6cafEK7hZf6uzf\",\"storeCode\":\"\",\"accessTokenEnv\":\"MAGENTO_MISTHUB_ACCESS_TOKEN\",\"enabled\":false,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"verificationEmailFrom\":\"no-reply@misthub.com\",\"verificationEmailReplyTo\":\"support@misthub.com\",\"holdThreshold\":2,\"cursorOverlapMinutes\":0,\"scanIntervalMinutes\":5},{\"id\":\"staging-vwu\",\"name\":\"Staging VWU\",\"baseUrl\":\"https://staging.vapewholesaleusa.com\",\"adminBaseUrl\":\"https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf\",\"storeCode\":\"default\",\"accessTokenEnv\":\"MAGENTO_STAGING_ACCESS_TOKEN\",\"enabled\":true,\"paymentFingerprintPaths\":[\"payment.additional_information.cc_token\",\"payment.additional_information.card_fingerprint\",\"payment.cc_last4\",\"extension_attributes.payment_fingerprint\"],\"verificationEmailFrom\":\"no-reply@vapewholesaleusa.com\",\"verificationEmailReplyTo\":\"support@vapewholesaleusa.com\",\"holdThreshold\":2,\"cursorOverlapMinutes\":0,\"scanIntervalMinutes\":5}]",
     "DEFAULT_HOLD_THRESHOLD": "2",
     "MANUAL_RUN_TOKEN_ENV": "MANUAL_RUN_TOKEN",
     "HOLD_ACTION_MODE": "live",
+    "FRAUD_SCAN_ENABLED": "true",
+    "MAGENTO_ORDER_UPDATES_ENABLED": "true",
+    "CUSTOMER_EMAIL_ENABLED": "true",
+    "TEST_EMAIL_FROM": "no-reply@vapewholesaleusa.com",
     "LOCAL_RUN_DIRECT": "false",
     "SLACK_CHANNEL_ID": "C0BBH9RE3GV"
   },
@@ -19,6 +23,18 @@
       "database_name": "fraud_hold_system",
       "database_id": "01b479e3-b4a7-423f-8943-6c3289b90598",
       "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "VERIFY_DOCS_BUCKET",
+      "bucket_name": "fraud-hold-verification-docs"
+    }
+  ],
+  "send_email": [
+    {
+      "name": "EMAIL",
+      "allowed_sender_addresses": ["no-reply@vapewholesaleusa.com", "no-reply@misthub.com"]
     }
   ],
   "workflows": [

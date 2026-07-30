@@ -78,20 +78,31 @@ describe("fraud rule engine", () => {
     const order: MagentoOrder = {
       ...baseOrder,
       grand_total: 175,
-      total_qty_ordered: 12
+      extension_attributes: {
+        shipping_assignments: [
+          {
+            shipping: {
+              address: {
+                ...baseOrder.billing_address,
+                street: ["99 Other St"]
+              }
+            }
+          }
+        ]
+      }
     };
     const decision = await evaluateFraudRules(env(), site, order, {
       db,
       now: new Date(),
       customer: null,
-      signal: { ...signal, grandTotal: 175, totalQty: 12 }
+      signal: { ...signal, grandTotal: 175 }
     });
 
     expect(decision.decision).toBe("hold");
     expect(decision.matchedCount).toBe(2);
     expect(decision.ruleResults.filter((result) => result.matched).map((result) => result.ruleId)).toEqual([
-      "order_total_gte_150",
-      "total_quantity_gte_10"
+      "billing_shipping_address_mismatch",
+      "order_total_gte_150"
     ]);
   });
 
@@ -123,11 +134,51 @@ describe("fraud rule engine", () => {
     const decision = await evaluateFraudRules(env(), site, order, { db, now: new Date(), signal, customer: null });
     const matched = decision.ruleResults.filter((result) => result.matched).map((result) => result.ruleId);
 
-    expect(matched).toContain("billing_shipping_address_mismatch");
-    expect(matched).toContain("billing_shipping_phone_mismatch");
-    expect(matched).toContain("billing_shipping_name_mismatch");
-    expect(decision.decision).toBe("hold");
+    expect(matched).toEqual(["billing_shipping_address_mismatch"]);
+    expect(decision.decision).toBe("allow");
   });
+
+  it.each([
+    [9, true],
+    [10, false]
+  ])(
+    "matches address mismatch only when completed order count is below 10 (count %s)",
+    async (completedOrderCount, expectedMatch) => {
+      const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+      const order: MagentoOrder = {
+        ...baseOrder,
+        extension_attributes: {
+          ...baseOrder.extension_attributes,
+          shipping_assignments: [
+            {
+              shipping: {
+                address: {
+                  ...baseOrder.billing_address,
+                  street: ["99 Other St"]
+                }
+              }
+            }
+          ]
+        }
+      };
+      const decision = await evaluateFraudRules(env(), site, order, {
+        db,
+        now: new Date(),
+        signal,
+        customer: null,
+        getCompletedOrderCount: async () => completedOrderCount
+      });
+
+      const addressMismatch = decision.ruleResults.find(
+        (result) => result.ruleId === "billing_shipping_address_mismatch"
+      );
+      expect(addressMismatch?.matched).toBe(expectedMatch);
+      expect(addressMismatch?.evidence).toMatchObject({
+        completedOrderCount,
+        establishedCustomer: completedOrderCount >= 10
+      });
+    }
+  );
 
   it("uses persisted signals for velocity and payment/billing history rules", async () => {
     const db = fakeDb({ recentCount: 1, differentPaymentOrBilling: true });

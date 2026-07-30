@@ -1,14 +1,23 @@
 export interface Env {
   DB: D1Database;
   FRAUD_SCAN_WORKFLOW: Workflow;
+  VERIFY_DOCS_BUCKET?: R2Bucket;
+  EMAIL?: SendEmail;
   MAGENTO_SITES_JSON: string;
   DEFAULT_HOLD_THRESHOLD?: string;
   MANUAL_RUN_TOKEN_ENV?: string;
   HOLD_ACTION_MODE?: string;
+  FRAUD_SCAN_ENABLED?: string;
+  MAGENTO_ORDER_UPDATES_ENABLED?: string;
+  CUSTOMER_EMAIL_ENABLED?: string;
   LOCAL_RUN_DIRECT?: string;
   SLACK_WEBHOOK_URL?: string;
   SLACK_BOT_TOKEN?: string;
   SLACK_CHANNEL_ID?: string;
+  STAFF_REVIEW_PASSWORD?: string;
+  STAFF_SESSION_SECRET?: string;
+  PUBLIC_BASE_URL?: string;
+  TEST_EMAIL_FROM?: string;
   [key: string]: unknown;
 }
 
@@ -24,6 +33,25 @@ export interface SiteConfig {
   holdThreshold?: number;
   cursorOverlapMinutes?: number;
   scanIntervalMinutes?: number;
+  verificationEmailFrom?: string;
+  verificationEmailReplyTo?: string;
+  authNetApiLoginIdEnv?: string;
+  authNetTransactionKeyEnv?: string;
+  authNetEnvironment?: "production" | "sandbox";
+  authNetTransactionIdPaths?: string[];
+  authNetCardLast4Paths?: string[];
+  requestAuthHeaderName?: string;
+  requestAuthHeaderValueEnv?: string;
+}
+
+export interface MagentoInvoice {
+  entity_id: number;
+  order_id?: number;
+  state?: number;
+  items?: Array<{
+    order_item_id?: number;
+    qty?: number | string;
+  }>;
 }
 
 export interface MagentoOrderAddress {
@@ -56,7 +84,18 @@ export interface MagentoOrder {
   billing_address?: MagentoOrderAddress;
   extension_attributes?: Record<string, unknown>;
   payment?: Record<string, unknown>;
-  items?: Array<{ qty_ordered?: number | string }>;
+  items?: Array<{
+    item_id?: number;
+    order_item_id?: number;
+    qty_ordered?: number | string;
+    qty_invoiced?: number | string;
+    qty_refunded?: number | string;
+  }>;
+  base_grand_total?: number | string;
+  base_total_paid?: number | string;
+  base_total_refunded?: number | string;
+  total_paid?: number | string;
+  total_refunded?: number | string;
   [key: string]: unknown;
 }
 
@@ -86,6 +125,7 @@ export interface RuleContext {
   now: Date;
   signal: OrderSignal;
   customer: MagentoCustomer | null;
+  getCompletedOrderCount?: () => Promise<number>;
 }
 
 export interface RuleResult {

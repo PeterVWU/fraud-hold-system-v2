@@ -8,8 +8,10 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - D1 stores site cursors, order reviews, rule evidence, reusable recent-order signals, and run logs.
 - Magento REST is used for order search, order detail, hold, status, and internal comments.
 - Rules live in `src/rules.ts`; each rule has an `id`, `name`, `enabled`, `required`, and `evaluate` function.
-- The initial hold threshold is 2 matched non-required rules. Required-rule support is built in but no initial rule is required.
-- Set `HOLD_ACTION_MODE=dry_run` for staging/read-only scans; use `live` to update Magento order status.
+- The hold threshold is 2 matched non-required rules. Required-rule support is built in but no current rule is required.
+- Magento writes require both `MAGENTO_ORDER_UPDATES_ENABLED=true` and `HOLD_ACTION_MODE=live`.
+- Customer verification email requires `CUSTOMER_EMAIL_ENABLED=true`.
+- Scheduled, manual, and latest-order scans require `FRAUD_SCAN_ENABLED=true`.
 - Slack alerts are sent after a successful Magento hold through `SLACK_BOT_TOKEN` and `SLACK_CHANNEL_ID`.
 - Slack hold messages keep the order details and add a final Magento admin link when `adminBaseUrl` is configured.
 - Site scans are isolated: a failure on one Magento site is logged but does not stop other enabled sites.
@@ -22,8 +24,9 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Workflow: `fraud-scan-workflow`
 - D1 database: `fraud_hold_system`
 - Schedule: every 5 minutes
-- Last documented deployed version: `778185fc-959e-4202-87bc-cc7b974952de`
-- Current deployed mode: `HOLD_ACTION_MODE=live`
+- Last documented deployed version: `01aa3b23-5984-41ad-a30a-02908f1ffb37`
+- Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live`.
+- Misthub remains disabled at the site level. Staging is enabled but its deployed scans fail at origin nginx Basic Auth; this failure is isolated from VWU.
 
 ## Configure
 
@@ -34,24 +37,79 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 ```bash
 npx wrangler secret put MAGENTO_MAIN_ACCESS_TOKEN
 npx wrangler secret put MAGENTO_MISTHUB_ACCESS_TOKEN
+npx wrangler secret put MAGENTO_STAGING_ACCESS_TOKEN
+npx wrangler secret put MAGENTO_VWU_AGENT_AUTH
 npx wrangler secret put SLACK_BOT_TOKEN
-npx wrangler secret put SLACK_WEBHOOK_URL
 npx wrangler secret put MANUAL_RUN_TOKEN
+npx wrangler secret put STAFF_REVIEW_PASSWORD
+npx wrangler secret put STAFF_SESSION_SECRET
 ```
 
 4. Update `MAGENTO_SITES_JSON` in `wrangler.jsonc` for each Magento site. Add one object per site with a unique `id`, `baseUrl`, `storeCode`, `accessTokenEnv`, optional `adminBaseUrl`, optional `paymentFingerprintPaths`, and optional `scanIntervalMinutes`. Scheduled scans default to the last 5-minute interval when no cursor exists.
 5. Set `SLACK_CHANNEL_ID=C0BBH9RE3GV` for the `fraud-hold-system` Slack channel. `SLACK_BOT_TOKEN` is preferred for channel posting; `SLACK_WEBHOOK_URL` remains supported as a fallback.
 
+## Verification Portal
+
+When an order reaches the fraud threshold, live mode first places an eligible order on Magento hold and creates the verification case only after that hold succeeds. In test mode it creates the case without changing Magento.
+
+- Customer links use random tokens stored only as hashes and expire after seven days.
+- Documents are validated for type and size, then stored privately in the `VERIFY_DOCS_BUCKET` R2 binding.
+- Staff sign in at `/staff/login` and review cases at `/staff`.
+- Approve releases a Magento hold and expects Magento status `processing`.
+- Decline is currently experimental and not production-ready. Its intended flow creates an offline invoice credit memo and closes or cancels the Magento order, while staff refunds the payment manually in Authorize.net. Staging currently returns a generic Magento 500 from the invoice-refund endpoint.
+- Both Magento actions are blocked unless Magento updates are enabled. Completed cases hide the action buttons and display a result message.
+- Queue rows and case pages include links to open the exact order in Magento in a new tab.
+- When email is disabled, staff can use **Open customer upload page** to test the customer flow without contacting anyone.
+- `/health` reports the effective `magentoUpdatesEnabled` and `customerEmailEnabled` values.
+
+Required staff credentials are secrets and must not be committed:
+
+```bash
+npx wrangler secret put STAFF_REVIEW_PASSWORD
+npx wrangler secret put STAFF_SESSION_SECRET
+```
+
+Apply D1 migrations before deploying the verification routes:
+
+```bash
+npm run db:migrate:remote
+```
+
+Safety switch matrix:
+
+| Setting | Test value | Live value |
+|---|---:|---:|
+| `FRAUD_SCAN_ENABLED` | `false` | `true` |
+| `MAGENTO_ORDER_UPDATES_ENABLED` | `false` | `true` |
+| `CUSTOMER_EMAIL_ENABLED` | `false` | `true` |
+| `HOLD_ACTION_MODE` | `dry_run` or `live` | `live` |
+
+Changing any safety switch is an explicit production action. Setting all three switches to `false` installs the application without scanning orders, changing Magento, or emailing customers. The checked-in production configuration currently sets all three to `true`. Do not enable Misthub without explicit approval.
+
 The secret name must be `SLACK_BOT_TOKEN`; paste the `xoxb-...` token only when Wrangler prompts for the secret value.
 
 ## Sites
 
+### VWU Production
+
+- Site ID: `vwu`
+- Enabled in config: yes
+- Magento base URL: `https://vapewholesaleusa.com`
+- REST base path: `/rest/V1`
+- Secret name: `MAGENTO_MAIN_ACCESS_TOKEN`
+- Additional perimeter header: `x-vwu-agent-auth`, sourced from `MAGENTO_VWU_AGENT_AUTH`
+- Status: scanning, Magento holds, Slack alerts, queue creation, and customer email verified working in production
+
+The Cloudflare security skip rule must allow `/rest/V1/` requests carrying the correct secret header for both GET and POST. Restricting it to GET allows order scans but blocks hold, unhold, comments, approve, and decline.
+
 ### Staging
 
+- Site ID: `staging-vwu`
 - Enabled in config: yes
 - Magento base URL: `https://staging.vapewholesaleusa.com`
-- Secret name: `MAGENTO_MAIN_ACCESS_TOKEN`
-- Current blocker: staging REST requests reach the origin after the Cloudflare WAF skip rule, but nginx basic auth still returns 401 unless REST API paths are exempted.
+- REST base path: `/rest/default/V1`
+- Secret name: `MAGENTO_STAGING_ACCESS_TOKEN`
+- Current blocker: the token works locally, but deployed Worker requests receive an nginx HTML 401 before reaching Magento. Exempt `/rest/` from nginx Basic Auth or protect it with a separate custom header.
 
 Admin base URL:
 
@@ -83,6 +141,21 @@ Rules: <matched rule names>
 Magento admin: Open order
 ```
 
+## Fraud Rules
+
+The active rules are:
+
+- Billing/shipping address mismatch. This signal is suppressed for established customers with at least 10 completed Magento orders before the current order.
+- Account age under 24 hours.
+- Two or more orders from the same customer or IP within one hour.
+- Order total at least $150.
+- ZIP does not match state.
+- Multiple cards or billing names used by the same customer in one day.
+
+The quantity-at-least-10, billing/shipping phone mismatch, and billing/shipping name mismatch rules were removed.
+
+Known ZIP limitation: Magento can return a full state name such as `NEBRASKA`, while the ZIP resolver returns `NE`. Full-name normalization is not implemented yet and can create a false positive. Order `000574302` was released after this exact issue was confirmed.
+
 ## Commands
 
 ```bash
@@ -105,6 +178,8 @@ curl -X POST https://<worker-url>/run -H "Authorization: Bearer <MANUAL_RUN_TOKE
 ```
 
 For local direct execution without queueing a Workflow, set `LOCAL_RUN_DIRECT=true` and call the same endpoint.
+
+To scan a bounded latest-order page, use `/run-latest?limit=50&page=1&site=<site-id>`. When Magento updates are enabled, one explicit site is required. Customer email must be disabled for this endpoint.
 
 Health check:
 

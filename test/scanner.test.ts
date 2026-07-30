@@ -22,9 +22,23 @@ vi.mock("../src/slack", () => ({
   sendSlackHoldAlert: vi.fn().mockResolvedValue({ attempted: true, succeeded: true, error: null })
 }));
 
-import { getSiteCursor, markHoldNotAttempted, markHoldResult, markSlackResult } from "../src/db";
+vi.mock("../src/verification", () => ({
+  createVerificationCaseForHold: vi.fn().mockResolvedValue({
+    verificationCase: { id: "case-1", incrementId: "000009001", magentoOrderId: 9001, customerEmail: "buyer@example.com" },
+    token: "token-1",
+    created: true
+  })
+}));
+
+vi.mock("../src/email", () => ({
+  sendVerificationEmail: vi.fn().mockResolvedValue(undefined)
+}));
+
+import { getSiteCursor, markHoldNotAttempted, markHoldResult, markHoldSkipped, markSlackResult } from "../src/db";
+import { sendVerificationEmail } from "../src/email";
 import { getScanStart, reviewOrder } from "../src/scanner";
 import { sendSlackHoldAlert } from "../src/slack";
+import { createVerificationCaseForHold } from "../src/verification";
 
 describe("scanner hold notifications", () => {
   beforeEach(() => {
@@ -36,9 +50,14 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      countCompletedOrders: vi.fn().mockResolvedValue(0),
       holdOrder: vi.fn().mockResolvedValue(true),
+      unholdOrder: vi.fn(),
       getOrderStatus: vi.fn().mockResolvedValue("holded"),
-      addOrderComment: vi.fn().mockResolvedValue(true)
+      addOrderComment: vi.fn().mockResolvedValue(true),
+      cancelOrder: vi.fn(),
+      listInvoices: vi.fn(),
+      refundInvoiceOffline: vi.fn()
     };
     const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
 
@@ -61,6 +80,14 @@ describe("scanner hold notifications", () => {
       expect.objectContaining({ decision: "hold", matchedCount: 2 })
     );
     expect(markSlackResult).toHaveBeenCalledWith(expect.anything(), expect.any(String), true, null);
+    expect(createVerificationCaseForHold).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ id: "staging" }),
+      expect.objectContaining({ entity_id: 9001 }),
+      expect.any(String),
+      expect.any(String)
+    );
+    expect(sendVerificationEmail).toHaveBeenCalledOnce();
     expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 1, holdsSucceeded: 1 });
   });
 
@@ -69,9 +96,14 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      countCompletedOrders: vi.fn().mockResolvedValue(0),
       holdOrder: vi.fn(),
+      unholdOrder: vi.fn(),
       getOrderStatus: vi.fn(),
-      addOrderComment: vi.fn()
+      addOrderComment: vi.fn(),
+      cancelOrder: vi.fn(),
+      listInvoices: vi.fn(),
+      refundInvoiceOffline: vi.fn()
     };
     const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
     const order = { ...suspiciousOrder(), status: "complete" };
@@ -87,6 +119,43 @@ describe("scanner hold notifications", () => {
       "status complete is not holdable",
       "live"
     );
+    expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 0, holdsSucceeded: 0 });
+  });
+
+  it("creates a test verification case without updating Magento or sending Slack", async () => {
+    const client = {
+      listOrders: vi.fn(),
+      getOrder: vi.fn(),
+      getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      countCompletedOrders: vi.fn().mockResolvedValue(0),
+      holdOrder: vi.fn(),
+      unholdOrder: vi.fn(),
+      getOrderStatus: vi.fn(),
+      addOrderComment: vi.fn(),
+      cancelOrder: vi.fn(),
+      listInvoices: vi.fn(),
+      refundInvoiceOffline: vi.fn()
+    };
+    const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+    const testEnv = {
+      ...env(),
+      MAGENTO_ORDER_UPDATES_ENABLED: "false",
+      CUSTOMER_EMAIL_ENABLED: "false"
+    };
+
+    await reviewOrder(testEnv, site(), client, suspiciousOrder(), new Date("2026-06-18T12:00:00Z"), stats);
+
+    expect(client.holdOrder).not.toHaveBeenCalled();
+    expect(client.addOrderComment).not.toHaveBeenCalled();
+    expect(sendSlackHoldAlert).not.toHaveBeenCalled();
+    expect(markHoldSkipped).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.any(String),
+      "pending",
+      "dry run: Magento hold skipped"
+    );
+    expect(createVerificationCaseForHold).toHaveBeenCalledOnce();
+    expect(sendVerificationEmail).toHaveBeenCalledOnce();
     expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 0, holdsSucceeded: 0 });
   });
 });
@@ -131,6 +200,8 @@ function env(): Env {
     MAGENTO_SITES_JSON: "[]",
     DEFAULT_HOLD_THRESHOLD: "2",
     HOLD_ACTION_MODE: "live",
+    MAGENTO_ORDER_UPDATES_ENABLED: "true",
+    CUSTOMER_EMAIL_ENABLED: "true",
     SLACK_BOT_TOKEN: "xoxb-test",
     SLACK_CHANNEL_ID: "C0BBH9RE3GV"
   };
@@ -178,7 +249,7 @@ function suspiciousOrder(): MagentoOrder {
             address: {
               firstname: "Jane",
               lastname: "Buyer",
-              street: ["10 Main St"],
+              street: ["99 Other St"],
               city: "Los Angeles",
               region_code: "CA",
               postcode: "90001",
