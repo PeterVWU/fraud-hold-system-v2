@@ -9,7 +9,7 @@
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
-- Last known deployed version: `66ef7c50-2cc2-4310-a319-61153867c946` (source commit `476d9ca`).
+- Last known deployed version: `5a9a234b-d92a-46f0-9ad9-2e9ff21d0d7b` (source commit `54bc2ef`).
 - Expected test count: 48.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
