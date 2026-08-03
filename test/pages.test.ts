@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { renderStaffCase, renderStaffList } from "../src/pages";
+import { renderCustomerUploadPage, renderStaffCase, renderStaffList } from "../src/pages";
+import type { VerificationInformationRequest } from "../src/verification";
 
 describe("staff verification queue", () => {
   it("renders a new-tab Magento admin link for each configured case", async () => {
@@ -53,7 +54,8 @@ describe("staff verification queue", () => {
         createdAt: "2026-07-29T00:00:00.000Z",
         updatedAt: "2026-07-29T00:00:00.000Z"
       },
-      null,
+      [],
+      [],
       { magentoUpdatesEnabled: true, customerEmailEnabled: true },
       "",
       "",
@@ -67,5 +69,88 @@ describe("staff verification queue", () => {
     expect(body).toContain("Refund the payment manually in Authorize.net");
     expect(body).toContain(">Decline</button>");
     expect(body).not.toContain("Decline and refund");
+    expect(body).not.toContain("Staff note");
+    expect(body).toContain("Request more information");
+    expect(body).toContain("ID of the Cardholder");
+    expect(body).toContain("Valid Tobacco License");
+    expect(body).toContain('name="custom_message"');
+  });
+
+  it("shows labeled customer uploads and every document and request on the staff case", async () => {
+    const informationRequest: VerificationInformationRequest = {
+      id: "request-1",
+      caseId: "case-1",
+      recipient: "buyer@example.com",
+      sender: "no-reply@example.com",
+      requestedDocumentTypes: ["cardholder_id", "billing_address_proof"],
+      customMessage: "Please include both sides.",
+      status: "sent" as const,
+      messageId: "message-1",
+      error: null,
+      createdAt: "2026-07-29T00:00:00.000Z",
+      sentAt: "2026-07-29T00:00:00.000Z",
+      updatedAt: "2026-07-29T00:00:00.000Z"
+    };
+    const customerResponse = renderCustomerUploadPage("000123", "token", "", informationRequest);
+    const customerBody = await customerResponse.text();
+
+    expect(customerBody).toContain('name="document:cardholder_id"');
+    expect(customerBody).toContain('name="document:billing_address_proof"');
+    expect(customerBody).toContain('name="document:additional"');
+    expect(customerBody).toContain('action="/verify/token?request=request-1"');
+    expect(customerBody).toContain("Please include both sides.");
+
+    const response = renderStaffCase(
+      {
+        id: "case-1",
+        reviewId: "review-1",
+        siteId: "vwu",
+        magentoOrderId: 123,
+        incrementId: "000123",
+        customerEmail: "buyer@example.com",
+        status: "submitted",
+        emailStatus: "sent",
+        emailError: null,
+        emailSentAt: "2026-07-29T00:00:00.000Z",
+        documentUploadedAt: "2026-07-29T00:00:00.000Z",
+        tokenExpiresAt: "2026-08-05T00:00:00.000Z",
+        matchedRuleNames: [],
+        createdAt: "2026-07-29T00:00:00.000Z",
+        updatedAt: "2026-07-29T00:00:00.000Z"
+      },
+      [
+        {
+          id: "document-1",
+          caseId: "case-1",
+          r2Key: "case/document-1",
+          filename: "id-front.jpg",
+          contentType: "image/jpeg",
+          size: 100,
+          uploadedAt: "2026-07-29T01:00:00.000Z",
+          requestId: "request-1",
+          documentType: "cardholder_id"
+        },
+        {
+          id: "document-2",
+          caseId: "case-1",
+          r2Key: "case/document-2",
+          filename: "bill.pdf",
+          contentType: "application/pdf",
+          size: 200,
+          uploadedAt: "2026-07-29T01:01:00.000Z",
+          requestId: "request-1",
+          documentType: "billing_address_proof"
+        }
+      ],
+      [informationRequest],
+      { magentoUpdatesEnabled: true, customerEmailEnabled: true }
+    );
+    const body = await response.text();
+
+    expect(body).toContain("id-front.jpg");
+    expect(body).toContain("bill.pdf");
+    expect(body).toContain("/staff/cases/case-1/documents/document-1");
+    expect(body).toContain("Proof of Billing Address");
+    expect(body).toContain("Please include both sides.");
   });
 });

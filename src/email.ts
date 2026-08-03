@@ -1,6 +1,12 @@
 import type { Env, MagentoOrder, SiteConfig } from "./types";
 import { isCustomerEmailEnabled } from "./config";
-import { recordEmailAttempt, type VerificationCase } from "./verification";
+import { getInformationRequestLabel, type InformationRequestType } from "./informationRequests";
+import {
+  completeInformationRequest,
+  createInformationRequest,
+  recordEmailAttempt,
+  type VerificationCase
+} from "./verification";
 
 export async function sendVerificationEmail(
   env: Env,
@@ -12,7 +18,7 @@ export async function sendVerificationEmail(
   now: string
 ): Promise<void> {
   const sender = site.verificationEmailFrom;
-  const recipient = order.customer_email ?? verificationCase.customerEmail;
+  const recipient = env.LOCAL_CUSTOMER_EMAIL_OVERRIDE?.trim() || order.customer_email || verificationCase.customerEmail;
   if (!isCustomerEmailEnabled(env)) {
     await recordEmailAttempt(env.DB, {
       caseId: verificationCase.id,
@@ -124,6 +130,70 @@ export async function sendVerificationTestEmail(
   return result.messageId;
 }
 
+export async function sendInformationRequestEmail(
+  env: Env,
+  site: SiteConfig,
+  order: MagentoOrder,
+  verificationCase: VerificationCase,
+  token: string,
+  requestUrl: string,
+  requestedDocumentTypes: InformationRequestType[],
+  customMessage: string | null,
+  now: string
+): Promise<{ sent: boolean; error: string | null }> {
+  const sender = site.verificationEmailFrom ?? "unconfigured";
+  const recipient = env.LOCAL_CUSTOMER_EMAIL_OVERRIDE?.trim() || order.customer_email || verificationCase.customerEmail;
+  const emailBinding = env.EMAIL;
+  const informationRequest = await createInformationRequest(env.DB, {
+    caseId: verificationCase.id,
+    recipient: recipient ?? null,
+    sender,
+    requestedDocumentTypes,
+    customMessage,
+    at: now
+  });
+
+  let error: string | null = null;
+  if (!isCustomerEmailEnabled(env)) {
+    error = "Customer email is disabled by CUSTOMER_EMAIL_ENABLED";
+  } else if (!site.verificationEmailFrom) {
+    error = "verificationEmailFrom is not configured for site";
+  } else if (!recipient) {
+    error = "order has no customer email";
+  } else if (!emailBinding) {
+    error = "EMAIL binding is not configured";
+  }
+
+  if (error) {
+    await completeInformationRequest(env.DB, informationRequest, { messageId: null, error, at: now });
+    return { sent: false, error };
+  }
+  if (!emailBinding || !recipient || !site.verificationEmailFrom) {
+    throw new Error("Email configuration validation did not produce a delivery error");
+  }
+
+  const magicLinkUrl = new URL(`/verify/${encodeURIComponent(token)}`, requestUrl);
+  magicLinkUrl.searchParams.set("request", informationRequest.id);
+  const magicLink = magicLinkUrl.toString();
+  const orderNumber = order.increment_id ?? verificationCase.incrementId ?? verificationCase.magentoOrderId;
+  try {
+    const result = await emailBinding.send({
+      to: recipient,
+      from: sender,
+      replyTo: site.verificationEmailReplyTo,
+      subject: `More information needed for order ${orderNumber}`,
+      text: renderInformationRequestEmailText(site, order, magicLink, requestedDocumentTypes, customMessage),
+      html: renderInformationRequestEmailHtml(site, order, magicLink, requestedDocumentTypes, customMessage)
+    });
+    await completeInformationRequest(env.DB, informationRequest, { messageId: result.messageId, error: null, at: now });
+    return { sent: true, error: null };
+  } catch (cause) {
+    error = errorToString(cause);
+    await completeInformationRequest(env.DB, informationRequest, { messageId: null, error, at: now });
+    return { sent: false, error };
+  }
+}
+
 export function renderVerificationEmailText(site: SiteConfig, order: MagentoOrder, magicLink: string): string {
   const orderNumber = order.increment_id ?? String(order.entity_id);
   return [
@@ -150,6 +220,58 @@ export function renderVerificationEmailHtml(site: SiteConfig, order: MagentoOrde
 <p><a href="${escapedLink}" style="display:inline-block;background:#0f766e;color:white;padding:10px 14px;text-decoration:none;border-radius:6px">Upload document</a></p>
 <p>If the button does not work, open this link: <br><a href="${escapedLink}">${escapedLink}</a></p>
 <p>After you submit the document, our staff will review it and either release the order for processing or cancel/refund it if verification is declined.</p>
+<p>If you did not place this order, please contact us by replying to this email.</p>
+</body></html>`;
+}
+
+export function renderInformationRequestEmailText(
+  site: SiteConfig,
+  order: MagentoOrder,
+  magicLink: string,
+  requestedDocumentTypes: InformationRequestType[],
+  customMessage: string | null
+): string {
+  const orderNumber = order.increment_id ?? String(order.entity_id);
+  const requestedItems = requestedDocumentTypes.map((type) => `- ${getInformationRequestLabel(type)}`);
+  return [
+    `We need more information to verify order ${orderNumber}.`,
+    "",
+    `For customer protection, ${site.name} has temporarily placed this order on hold.`,
+    ...(customMessage ? ["", customMessage] : []),
+    ...(requestedItems.length > 0 ? ["", "Please provide:", ...requestedItems] : []),
+    "",
+    "Upload the requested documents using this secure link:",
+    magicLink,
+    "",
+    "After you submit the documents, our staff will review them and contact you if anything else is needed.",
+    "",
+    "If you did not place this order, please contact us by replying to this email."
+  ].join("\n");
+}
+
+export function renderInformationRequestEmailHtml(
+  site: SiteConfig,
+  order: MagentoOrder,
+  magicLink: string,
+  requestedDocumentTypes: InformationRequestType[],
+  customMessage: string | null
+): string {
+  const escapedLink = escapeHtml(magicLink);
+  const orderNumber = escapeHtml(order.increment_id ?? String(order.entity_id));
+  const requestedItems = requestedDocumentTypes
+    .map((type) => `<li>${escapeHtml(getInformationRequestLabel(type))}</li>`)
+    .join("");
+  const customMessageHtml = customMessage
+    ? `<p>${escapeHtml(customMessage).replace(/\n/g, "<br>")}</p>`
+    : "";
+  return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172033;line-height:1.5">
+<h1 style="font-size:20px">More information needed for order ${orderNumber}</h1>
+<p>For customer protection, ${escapeHtml(site.name)} has temporarily placed this order on hold.</p>
+${customMessageHtml}
+${requestedItems ? `<p>Please provide:</p><ul>${requestedItems}</ul>` : ""}
+<p><a href="${escapedLink}" style="display:inline-block;background:#0f766e;color:white;padding:10px 14px;text-decoration:none;border-radius:6px">Upload requested documents</a></p>
+<p>If the button does not work, open this link: <br><a href="${escapedLink}">${escapedLink}</a></p>
+<p>After you submit the documents, our staff will review them and contact you if anything else is needed.</p>
 <p>If you did not place this order, please contact us by replying to this email.</p>
 </body></html>`;
 }

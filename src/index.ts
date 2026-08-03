@@ -1,5 +1,5 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
-import { sendVerificationEmail, sendVerificationTestEmail } from "./email";
+import { sendInformationRequestEmail, sendVerificationTestEmail } from "./email";
 import {
   getCustomerHistoryExemptionMonths,
   isCustomerEmailEnabled,
@@ -7,6 +7,7 @@ import {
   isMagentoOrderUpdatesEnabled
 } from "./config";
 import { buildMagentoAdminOrderUrl } from "./magentoAdmin";
+import { isInformationRequestType, type InformationRequestType, type VerificationDocumentType } from "./informationRequests";
 import { html, redirect, renderCustomerUploadPage, renderStaffCase, renderStaffList, renderStaffLogin } from "./pages";
 import { approveVerificationCase, declineVerificationCase } from "./reviewActions";
 import { scanAllSites, scanLatestOrdersAllSites } from "./scanner";
@@ -18,9 +19,10 @@ import {
   getSiteForCase,
   getVerificationCaseByToken,
   getVerificationCaseDetail,
+  getVerificationDocument,
   listStaffCases,
   recordAction,
-  recordDocumentUpload,
+  recordDocumentUploads,
   rotateVerificationToken,
   updateCaseStatus
 } from "./verification";
@@ -164,39 +166,61 @@ async function handleCustomerVerify(request: Request, env: Env, token: string): 
     return html("<main class=\"shell narrow\"><h1>Link not found</h1><p>This verification link is invalid or expired.</p></main>", 404);
   }
   const orderLabel = detail.case.incrementId ?? String(detail.case.magentoOrderId);
+  const requestedInformationRequestId = new URL(request.url).searchParams.get("request");
+  const informationRequest = requestedInformationRequestId
+    ? detail.informationRequests.find((item) => item.id === requestedInformationRequestId && item.status === "sent") ?? null
+    : detail.informationRequests.find((item) => item.status === "sent") ?? null;
+  if (requestedInformationRequestId && !informationRequest) {
+    return html("<main class=\"shell narrow\"><h1>Link not found</h1><p>This information request is invalid or was not sent.</p></main>", 404);
+  }
   if (request.method === "GET") {
     const message = detail.case.status === "submitted" ? "Your document has been submitted." : "";
-    return renderCustomerUploadPage(orderLabel, token, message);
+    return renderCustomerUploadPage(orderLabel, token, message, informationRequest);
   }
   if (request.method !== "POST") {
     return Response.json({ error: "method not allowed" }, { status: 405 });
   }
   if (!env.VERIFY_DOCS_BUCKET) {
-    return renderCustomerUploadPage(orderLabel, token, "Document storage is not configured. Please contact support.");
+    return renderCustomerUploadPage(orderLabel, token, "Document storage is not configured. Please contact support.", informationRequest);
   }
   const form = await request.formData();
-  const file = asUploadedFile(form.get("document"));
-  if (!file) {
-    return renderCustomerUploadPage(orderLabel, token, "Choose one document to upload.");
+  const uploadResult = collectUploads(form, informationRequest?.requestedDocumentTypes ?? null);
+  if (uploadResult.error) {
+    return renderCustomerUploadPage(orderLabel, token, uploadResult.error, informationRequest);
   }
-  const validationError = validateUpload(file);
-  if (validationError) {
-    return renderCustomerUploadPage(orderLabel, token, validationError);
+  if (uploadResult.uploads.length > 12) {
+    return renderCustomerUploadPage(orderLabel, token, "Upload no more than 12 files at a time.", informationRequest);
+  }
+  const totalUploadSize = uploadResult.uploads.reduce((total, upload) => total + upload.file.size, 0);
+  if (totalUploadSize > 48 * 1024 * 1024) {
+    return renderCustomerUploadPage(orderLabel, token, "The combined upload is too large. The limit is 48 MB.", informationRequest);
+  }
+  for (const upload of uploadResult.uploads) {
+    const validationError = validateUpload(upload.file);
+    if (validationError) {
+      return renderCustomerUploadPage(orderLabel, token, `${upload.file.name}: ${validationError}`, informationRequest);
+    }
   }
   const uploadedAt = new Date().toISOString();
-  const key = `${detail.case.siteId}/${detail.case.id}/${crypto.randomUUID()}-${sanitizeFilename(file.name)}`;
-  await env.VERIFY_DOCS_BUCKET.put(key, await file.arrayBuffer(), {
-    httpMetadata: { contentType: file.type }
-  });
-  await recordDocumentUpload(env.DB, {
-    caseId: detail.case.id,
-    r2Key: key,
-    filename: file.name,
-    contentType: file.type,
-    size: file.size,
-    uploadedAt
-  });
-  return renderCustomerUploadPage(orderLabel, token, "Thank you. Your document was submitted for review.");
+  const documents = [];
+  for (const upload of uploadResult.uploads) {
+    const key = `${detail.case.siteId}/${detail.case.id}/${crypto.randomUUID()}-${sanitizeFilename(upload.file.name)}`;
+    await env.VERIFY_DOCS_BUCKET.put(key, await upload.file.arrayBuffer(), {
+      httpMetadata: { contentType: upload.file.type }
+    });
+    documents.push({
+      caseId: detail.case.id,
+      r2Key: key,
+      filename: upload.file.name,
+      contentType: upload.file.type,
+      size: upload.file.size,
+      uploadedAt,
+      requestId: informationRequest?.id ?? null,
+      documentType: upload.documentType
+    });
+  }
+  await recordDocumentUploads(env.DB, documents);
+  return renderCustomerUploadPage(orderLabel, token, "Thank you. Your documents were submitted for review.", informationRequest);
 }
 
 async function handleStaffLogin(request: Request, env: Env): Promise<Response> {
@@ -231,12 +255,12 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
     );
   }
 
-  const documentMatch = url.pathname.match(/^\/staff\/cases\/([^/]+)\/document$/);
+  const documentMatch = url.pathname.match(/^\/staff\/cases\/([^/]+)\/documents\/([^/]+)$/);
   if (documentMatch && request.method === "GET") {
-    return handleStaffDocument(env, documentMatch[1]);
+    return handleStaffDocument(env, documentMatch[1], documentMatch[2]);
   }
 
-  const actionMatch = url.pathname.match(/^\/staff\/cases\/([^/]+)\/(approve|decline|resend-email|send-test-email|open-test-link)$/);
+  const actionMatch = url.pathname.match(/^\/staff\/cases\/([^/]+)\/(approve|decline|request-information|send-test-email|open-test-link)$/);
   if (actionMatch && request.method === "POST") {
     return handleStaffAction(request, env, actionMatch[1], actionMatch[2]);
   }
@@ -249,7 +273,8 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
     }
     return renderStaffCase(
       detail.case,
-      detail.document,
+      detail.documents,
+      detail.informationRequests,
       getCapabilities(env),
       "",
       url.searchParams.get("success") ?? "",
@@ -260,22 +285,22 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
   return Response.json({ error: "not found" }, { status: 404 });
 }
 
-async function handleStaffDocument(env: Env, caseId: string): Promise<Response> {
-  const detail = await getVerificationCaseDetail(env.DB, caseId);
-  if (!detail?.document) {
+async function handleStaffDocument(env: Env, caseId: string, documentId: string): Promise<Response> {
+  const document = await getVerificationDocument(env.DB, caseId, documentId);
+  if (!document) {
     return Response.json({ error: "document not found" }, { status: 404 });
   }
   if (!env.VERIFY_DOCS_BUCKET) {
     return Response.json({ error: "document storage is not configured" }, { status: 500 });
   }
-  const object = await env.VERIFY_DOCS_BUCKET.get(detail.document.r2Key);
+  const object = await env.VERIFY_DOCS_BUCKET.get(document.r2Key);
   if (!object) {
     return Response.json({ error: "document missing from storage" }, { status: 404 });
   }
   return new Response(object.body, {
     headers: {
-      "Content-Type": detail.document.contentType,
-      "Content-Disposition": `inline; filename="${detail.document.filename.replace(/"/g, "")}"`
+      "Content-Type": document.contentType,
+      "Content-Disposition": `inline; filename="${document.filename.replace(/[\r\n"]/g, "")}"`
     }
   });
 }
@@ -286,23 +311,60 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
     return html("<main class=\"shell\"><h1>Case not found</h1></main>", 404);
   }
   const form = await request.formData();
-  const note = optionalText(form.get("note"));
   const now = new Date().toISOString();
   const site = getSiteForCase(env, detail.case.siteId);
+
+  if (action === "request-information") {
+    const validation = validateInformationRequestForm(form);
+    if (validation.error) {
+      return renderStaffCase(
+        detail.case,
+        detail.documents,
+        detail.informationRequests,
+        getCapabilities(env),
+        validation.error,
+        "",
+        buildMagentoAdminOrderUrl(site, detail.case.magentoOrderId)
+      );
+    }
+    if (!["awaiting_customer", "submitted"].includes(detail.case.status)) {
+      return renderStaffCase(
+        detail.case,
+        detail.documents,
+        detail.informationRequests,
+        getCapabilities(env),
+        "This case can no longer accept customer documents.",
+        "",
+        buildMagentoAdminOrderUrl(site, detail.case.magentoOrderId)
+      );
+    }
+    try {
+      const order = await fetchCaseMagentoOrder(env, detail.case);
+      const token = await rotateVerificationToken(env.DB, detail.case.id, now);
+      const result = await sendInformationRequestEmail(
+        env,
+        site,
+        order,
+        detail.case,
+        token,
+        request.url,
+        validation.requestedDocumentTypes,
+        validation.customMessage,
+        now
+      );
+      if (result.sent) {
+        return redirect(`/staff/cases/${detail.case.id}?success=${encodeURIComponent("Information request email sent.")}`);
+      }
+      return renderStaffCaseAfterEmailFailure(env, detail.case.id, result.error ?? "Email delivery failed.");
+    } catch (error) {
+      return renderStaffCaseAfterEmailFailure(env, detail.case.id, error instanceof Error ? error.message : String(error));
+    }
+  }
 
   try {
     if (action === "open-test-link") {
       const token = await rotateVerificationToken(env.DB, detail.case.id, now);
       return redirect(`/verify/${encodeURIComponent(token)}`);
-    }
-    if (action === "resend-email") {
-      if (!isCustomerEmailEnabled(env)) {
-        throw new Error("Customer email is disabled by CUSTOMER_EMAIL_ENABLED");
-      }
-      const order = await fetchCaseMagentoOrder(env, detail.case);
-      const token = await rotateVerificationToken(env.DB, detail.case.id, now);
-      await sendVerificationEmail(env, site, order, detail.case, token, request.url, now);
-      return redirect(`/staff/cases/${detail.case.id}?success=${encodeURIComponent("Verification email sent.")}`);
     }
     if (action === "send-test-email") {
       if (isCustomerEmailEnabled(env)) {
@@ -318,11 +380,11 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
       return redirect(`/staff/cases/${detail.case.id}?success=${encodeURIComponent("Test verification email sent.")}`);
     }
     if (action === "approve") {
-      await approveVerificationCase(env, site, detail.case, note, now);
+      await approveVerificationCase(env, site, detail.case, now);
       return redirect(`/staff/cases/${detail.case.id}?success=${encodeURIComponent("Order approved and released for processing.")}`);
     }
     if (action === "decline") {
-      await declineVerificationCase(env, site, detail.case, note, now);
+      await declineVerificationCase(env, site, detail.case, now);
       return redirect(`/staff/cases/${detail.case.id}?success=${encodeURIComponent("Order declined. Magento credit memo created and order closed or canceled. Remember to refund it manually in Authorize.net.")}`);
     }
   } catch (error) {
@@ -332,7 +394,7 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
       await recordAction(env.DB, {
         caseId: detail.case.id,
         action,
-        staffNote: note,
+        staffNote: null,
         error: message,
         at: now
       });
@@ -340,7 +402,8 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
     await updateCaseStatus(env.DB, detail.case.id, "action_failed", now);
     return renderStaffCase(
       { ...detail.case, status: "action_failed" },
-      detail.document,
+      detail.documents,
+      detail.informationRequests,
       getCapabilities(env),
       message,
       "",
@@ -349,6 +412,23 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
   }
 
   return Response.json({ error: "not found" }, { status: 404 });
+}
+
+async function renderStaffCaseAfterEmailFailure(env: Env, caseId: string, error: string): Promise<Response> {
+  const detail = await getVerificationCaseDetail(env.DB, caseId);
+  if (!detail) {
+    return html("<main class=\"shell\"><h1>Case not found</h1></main>", 404);
+  }
+  const site = getSiteForCase(env, detail.case.siteId);
+  return renderStaffCase(
+    detail.case,
+    detail.documents,
+    detail.informationRequests,
+    getCapabilities(env),
+    error,
+    "",
+    buildMagentoAdminOrderUrl(site, detail.case.magentoOrderId)
+  );
 }
 
 function getCapabilities(
@@ -416,4 +496,50 @@ function sanitizeFilename(filename: string): string {
 function optionalText(value: unknown): string | null {
   const text = typeof value === "string" ? value.trim() : "";
   return text || null;
+}
+
+function validateInformationRequestForm(form: FormData): {
+  requestedDocumentTypes: InformationRequestType[];
+  customMessage: string | null;
+  error: string | null;
+} {
+  const values = form.getAll("requested_document").map(String);
+  const requestedDocumentTypes = Array.from(new Set(values.filter(isInformationRequestType)));
+  const customMessage = optionalText(form.get("custom_message"));
+  let error: string | null = null;
+  if (values.some((value) => !isInformationRequestType(value))) {
+    error = "One or more selected document requests are invalid.";
+  } else if (!requestedDocumentTypes.length && !customMessage) {
+    error = "Select at least one document or enter a custom message.";
+  } else if (customMessage && customMessage.length > 2000) {
+    error = "The custom message must be 2,000 characters or fewer.";
+  }
+  return { requestedDocumentTypes, customMessage, error };
+}
+
+function collectUploads(
+  form: FormData,
+  requestedDocumentTypes: InformationRequestType[] | null
+): { uploads: Array<{ file: UploadedFile; documentType: VerificationDocumentType }>; error: string | null } {
+  const uploads: Array<{ file: UploadedFile; documentType: VerificationDocumentType }> = [];
+  if (!requestedDocumentTypes) {
+    for (const value of form.getAll("document")) {
+      const file = asUploadedFile(value);
+      if (file) uploads.push({ file, documentType: null });
+    }
+    return uploads.length ? { uploads, error: null } : { uploads, error: "Choose at least one document to upload." };
+  }
+
+  for (const type of requestedDocumentTypes) {
+    const files = form.getAll(`document:${type}`).map(asUploadedFile).filter((file): file is UploadedFile => file !== null);
+    if (files.length === 0) {
+      return { uploads: [], error: `Choose a file for every requested document.` };
+    }
+    uploads.push(...files.map((file) => ({ file, documentType: type })));
+  }
+  for (const value of form.getAll("document:additional")) {
+    const file = asUploadedFile(value);
+    if (file) uploads.push({ file, documentType: "additional" });
+  }
+  return uploads.length ? { uploads, error: null } : { uploads, error: "Choose at least one document to upload." };
 }

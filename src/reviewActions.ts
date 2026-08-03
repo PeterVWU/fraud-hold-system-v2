@@ -11,7 +11,6 @@ export async function approveVerificationCase(
   env: Env,
   site: SiteConfig,
   verificationCase: VerificationCase,
-  staffNote: string | null,
   now: string
 ): Promise<void> {
   assertMagentoOrderUpdatesEnabled(env);
@@ -28,12 +27,12 @@ export async function approveVerificationCase(
   await client.addOrderComment(
     verificationCase.magentoOrderId,
     statusAfter,
-    `Fraud verification approved.${staffNote ? ` Staff note: ${staffNote}` : ""}`
+    "Fraud verification approved."
   );
   if (statusAfter !== "processing") {
     throw new Error(`Expected Magento status processing after approval, got ${statusAfter}`);
   }
-  await recordAction(env.DB, { caseId: verificationCase.id, action: "approve", staffNote, at: now });
+  await recordAction(env.DB, { caseId: verificationCase.id, action: "approve", staffNote: null, at: now });
   await updateCaseStatus(env.DB, verificationCase.id, "approved", now);
 }
 
@@ -41,7 +40,6 @@ export async function declineVerificationCase(
   env: Env,
   site: SiteConfig,
   verificationCase: VerificationCase,
-  staffNote: string | null,
   now: string
 ): Promise<void> {
   assertMagentoOrderUpdatesEnabled(env);
@@ -65,7 +63,7 @@ export async function declineVerificationCase(
     creditmemoId = await client.refundInvoiceOffline(invoice.entity_id, {
       items: buildRefundItems(order),
       shippingAmount: refundableShipping(order),
-      comment: `Fraud verification declined.${staffNote ? ` Staff note: ${staffNote}` : ""}`
+      comment: "Fraud verification declined."
     });
   } catch (error) {
     if (releasedHold) {
@@ -91,7 +89,7 @@ export async function declineVerificationCase(
   await recordAction(env.DB, {
     caseId: verificationCase.id,
     action: "decline",
-    staffNote,
+    staffNote: null,
     magentoCreditmemoId: creditmemoId,
     at: now
   });

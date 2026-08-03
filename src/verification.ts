@@ -2,6 +2,12 @@ import { getAccessToken, getMagentoRequestHeaders } from "./config";
 import { createMagentoClient } from "./magento";
 import { getOrderEntityId } from "./normalizers";
 import type { Env, MagentoOrder, SiteConfig } from "./types";
+import {
+  isInformationRequestType,
+  parseInformationRequestTypes,
+  type InformationRequestType,
+  type VerificationDocumentType
+} from "./informationRequests";
 
 export type VerificationCaseStatus =
   | "awaiting_customer"
@@ -36,11 +42,29 @@ export interface VerificationDocument {
   contentType: string;
   size: number;
   uploadedAt: string;
+  requestId: string | null;
+  documentType: VerificationDocumentType;
+}
+
+export interface VerificationInformationRequest {
+  id: string;
+  caseId: string;
+  recipient: string | null;
+  sender: string;
+  requestedDocumentTypes: InformationRequestType[];
+  customMessage: string | null;
+  status: "pending" | "sent" | "failed";
+  messageId: string | null;
+  error: string | null;
+  createdAt: string;
+  sentAt: string | null;
+  updatedAt: string;
 }
 
 export interface VerificationCaseDetail {
   case: VerificationCase;
-  document: VerificationDocument | null;
+  documents: VerificationDocument[];
+  informationRequests: VerificationInformationRequest[];
 }
 
 export async function createVerificationCaseForHold(
@@ -105,7 +129,7 @@ export async function getVerificationCaseByToken(db: D1Database, token: string):
   if (!row) {
     return null;
   }
-  return { case: mapCase(row), document: await getLatestDocument(db, row.id) };
+  return getVerificationCaseRelations(db, mapCase(row));
 }
 
 export async function rotateVerificationToken(
@@ -126,7 +150,7 @@ export async function getVerificationCaseDetail(db: D1Database, caseId: string):
   if (!verificationCase) {
     return null;
   }
-  return { case: verificationCase, document: await getLatestDocument(db, caseId) };
+  return getVerificationCaseRelations(db, verificationCase);
 }
 
 export async function listStaffCases(db: D1Database): Promise<VerificationCase[]> {
@@ -144,32 +168,139 @@ export async function listStaffCases(db: D1Database): Promise<VerificationCase[]
   return (result.results ?? []).map(mapCase);
 }
 
-export async function recordDocumentUpload(
+export async function recordDocumentUploads(
   db: D1Database,
-  input: {
+  inputs: Array<{
     caseId: string;
     r2Key: string;
     filename: string;
     contentType: string;
     size: number;
     uploadedAt: string;
-  }
+    requestId: string | null;
+    documentType: VerificationDocumentType;
+  }>
 ): Promise<void> {
+  if (inputs.length === 0) {
+    return;
+  }
+  const latest = inputs[inputs.length - 1];
   await db.batch([
-    db
+    ...inputs.map((input) => db
       .prepare(
-        `INSERT INTO verification_documents (id, case_id, r2_key, filename, content_type, size, uploaded_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO verification_documents (
+          id, case_id, r2_key, filename, content_type, size, uploaded_at, request_id, document_type
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .bind(crypto.randomUUID(), input.caseId, input.r2Key, input.filename, input.contentType, input.size, input.uploadedAt),
+      .bind(
+        crypto.randomUUID(),
+        input.caseId,
+        input.r2Key,
+        input.filename,
+        input.contentType,
+        input.size,
+        input.uploadedAt,
+        input.requestId,
+        input.documentType
+      )),
     db
       .prepare(
         `UPDATE verification_cases
          SET status = 'submitted', document_uploaded_at = ?, updated_at = ?
          WHERE id = ?`
       )
-      .bind(input.uploadedAt, input.uploadedAt, input.caseId)
+      .bind(latest.uploadedAt, latest.uploadedAt, latest.caseId)
   ]);
+}
+
+export async function createInformationRequest(
+  db: D1Database,
+  input: {
+    caseId: string;
+    recipient: string | null;
+    sender: string;
+    requestedDocumentTypes: InformationRequestType[];
+    customMessage: string | null;
+    at: string;
+  }
+): Promise<VerificationInformationRequest> {
+  const id = crypto.randomUUID();
+  await db.prepare(
+    `INSERT INTO verification_information_requests (
+      id, case_id, recipient, sender, requested_document_types, custom_message,
+      status, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)`
+  ).bind(
+    id,
+    input.caseId,
+    input.recipient,
+    input.sender,
+    JSON.stringify(input.requestedDocumentTypes),
+    input.customMessage,
+    input.at,
+    input.at
+  ).run();
+  return {
+    id,
+    caseId: input.caseId,
+    recipient: input.recipient,
+    sender: input.sender,
+    requestedDocumentTypes: input.requestedDocumentTypes,
+    customMessage: input.customMessage,
+    status: "pending",
+    messageId: null,
+    error: null,
+    createdAt: input.at,
+    sentAt: null,
+    updatedAt: input.at
+  };
+}
+
+export async function completeInformationRequest(
+  db: D1Database,
+  request: VerificationInformationRequest,
+  result: { messageId: string | null; error: string | null; at: string }
+): Promise<void> {
+  const status = result.error ? "failed" : "sent";
+  await db.batch([
+    db.prepare(
+      `UPDATE verification_information_requests
+       SET status = ?, message_id = ?, error = ?, sent_at = ?, updated_at = ?
+       WHERE id = ?`
+    ).bind(status, result.messageId, result.error, result.error ? null : result.at, result.at, request.id),
+    db.prepare(
+      `INSERT INTO verification_email_attempts (id, case_id, recipient, sender, message_id, error, attempted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      crypto.randomUUID(),
+      request.caseId,
+      request.recipient,
+      request.sender,
+      result.messageId,
+      result.error,
+      result.at
+    ),
+    db.prepare(
+      `UPDATE verification_cases
+       SET email_status = ?, email_error = ?,
+         email_sent_at = CASE WHEN ? IS NULL THEN ? ELSE email_sent_at END,
+         updated_at = ?
+       WHERE id = ?`
+    ).bind(status, result.error, result.error, result.at, result.at, request.caseId)
+  ]);
+}
+
+export async function getVerificationDocument(
+  db: D1Database,
+  caseId: string,
+  documentId: string
+): Promise<VerificationDocument | null> {
+  const row = await db.prepare(
+    `SELECT id, case_id, r2_key, filename, content_type, size, uploaded_at, request_id, document_type
+     FROM verification_documents
+     WHERE case_id = ? AND id = ?`
+  ).bind(caseId, documentId).first<VerificationDocumentRow>();
+  return row ? mapDocument(row) : null;
 }
 
 export async function recordEmailAttempt(
@@ -346,28 +477,39 @@ async function getVerificationCaseById(db: D1Database, caseId: string): Promise<
   return row ? mapCase(row) : null;
 }
 
-async function getLatestDocument(db: D1Database, caseId: string): Promise<VerificationDocument | null> {
-  const row = await db
+async function getVerificationCaseRelations(
+  db: D1Database,
+  verificationCase: VerificationCase
+): Promise<VerificationCaseDetail> {
+  const [documents, informationRequests] = await Promise.all([
+    getDocuments(db, verificationCase.id),
+    getInformationRequests(db, verificationCase.id)
+  ]);
+  return { case: verificationCase, documents, informationRequests };
+}
+
+async function getDocuments(db: D1Database, caseId: string): Promise<VerificationDocument[]> {
+  const result = await db
     .prepare(
-      `SELECT id, case_id, r2_key, filename, content_type, size, uploaded_at
+      `SELECT id, case_id, r2_key, filename, content_type, size, uploaded_at, request_id, document_type
        FROM verification_documents
        WHERE case_id = ?
-       ORDER BY uploaded_at DESC
-       LIMIT 1`
+       ORDER BY uploaded_at DESC, id DESC`
     )
     .bind(caseId)
-    .first<VerificationDocumentRow>();
-  return row
-    ? {
-        id: row.id,
-        caseId: row.case_id,
-        r2Key: row.r2_key,
-        filename: row.filename,
-        contentType: row.content_type,
-        size: row.size,
-        uploadedAt: row.uploaded_at
-      }
-    : null;
+    .all<VerificationDocumentRow>();
+  return (result.results ?? []).map(mapDocument);
+}
+
+async function getInformationRequests(db: D1Database, caseId: string): Promise<VerificationInformationRequest[]> {
+  const result = await db.prepare(
+    `SELECT id, case_id, recipient, sender, requested_document_types, custom_message,
+      status, message_id, error, created_at, sent_at, updated_at
+     FROM verification_information_requests
+     WHERE case_id = ?
+     ORDER BY created_at DESC, id DESC`
+  ).bind(caseId).all<VerificationInformationRequestRow>();
+  return (result.results ?? []).map(mapInformationRequest);
 }
 
 interface VerificationCaseRow {
@@ -396,6 +538,23 @@ interface VerificationDocumentRow {
   content_type: string;
   size: number;
   uploaded_at: string;
+  request_id: string | null;
+  document_type: string | null;
+}
+
+interface VerificationInformationRequestRow {
+  id: string;
+  case_id: string;
+  recipient: string | null;
+  sender: string;
+  requested_document_types: string;
+  custom_message: string | null;
+  status: "pending" | "sent" | "failed";
+  message_id: string | null;
+  error: string | null;
+  created_at: string;
+  sent_at: string | null;
+  updated_at: string;
 }
 
 function mapCase(row: VerificationCaseRow): VerificationCase {
@@ -414,6 +573,42 @@ function mapCase(row: VerificationCaseRow): VerificationCase {
     tokenExpiresAt: row.token_expires_at,
     matchedRuleNames: row.matched_rule_names ? row.matched_rule_names.split("||") : [],
     createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function mapDocument(row: VerificationDocumentRow): VerificationDocument {
+  const documentType = row.document_type === "additional"
+    ? "additional"
+    : row.document_type && isInformationRequestType(row.document_type)
+      ? row.document_type
+      : null;
+  return {
+    id: row.id,
+    caseId: row.case_id,
+    r2Key: row.r2_key,
+    filename: row.filename,
+    contentType: row.content_type,
+    size: row.size,
+    uploadedAt: row.uploaded_at,
+    requestId: row.request_id,
+    documentType
+  };
+}
+
+function mapInformationRequest(row: VerificationInformationRequestRow): VerificationInformationRequest {
+  return {
+    id: row.id,
+    caseId: row.case_id,
+    recipient: row.recipient,
+    sender: row.sender,
+    requestedDocumentTypes: parseInformationRequestTypes(row.requested_document_types),
+    customMessage: row.custom_message,
+    status: row.status,
+    messageId: row.message_id,
+    error: row.error,
+    createdAt: row.created_at,
+    sentAt: row.sent_at,
     updatedAt: row.updated_at
   };
 }

@@ -19,6 +19,7 @@ export interface Env {
   STAFF_SESSION_SECRET?: string;
   PUBLIC_BASE_URL?: string;
   TEST_EMAIL_FROM?: string;
+  LOCAL_CUSTOMER_EMAIL_OVERRIDE?: string;
   [key: string]: unknown;
 }
 
