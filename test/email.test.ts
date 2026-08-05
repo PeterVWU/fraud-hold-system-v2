@@ -160,7 +160,7 @@ describe("verification email", () => {
       verificationCase(),
       "new-token",
       "https://example.com/staff/cases/case-1",
-      ["cardholder_selfie_with_id", "business_license"],
+      ["payment_card", "business_or_tobacco_license"],
       null,
       "2026-06-18T12:00:00.000Z"
     );
@@ -171,8 +171,8 @@ describe("verification email", () => {
       subject: "More information needed for order 000009001",
       text: expect.stringContaining("https://example.com/verify/new-token")
     }));
-    expect(send.mock.calls[0][0].text).toContain("A selfie of the cardholder holding the ID next to their face");
-    expect(send.mock.calls[0][0].text).toContain("Valid Business License");
+    expect(send.mock.calls[0][0].text).toContain("Copy of the payment card used (showing the last 4 digits and cardholder's name)");
+    expect(send.mock.calls[0][0].text).toContain("Valid Business or Tobacco License");
     expect(bindings.flat()).toContain("message-2");
     expect(bindings.flat()).toContain("sent");
   });

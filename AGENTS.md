@@ -10,7 +10,7 @@
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
 - Last known deployed version: `5a9a234b-d92a-46f0-9ad9-2e9ff21d0d7b` (source commit `54bc2ef`).
-- Expected test count: 48.
+- Expected test count: 58.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
@@ -25,6 +25,9 @@
 - Four verified production orders (`000574263`, `000574269`, `000574275`, and `000574302`) completed the hold/Slack/email/queue flow. `000574302` was later released and its case marked approved because of a false-positive ZIP/state comparison.
 
 ## Sites
+
+- Treat each site's `enabled` flag as persistent production state. Do not change any site's enabled/disabled status as a side effect of a deployment.
+- Before deploying, verify the candidate configuration preserves the currently deployed site statuses unless the user explicitly instructs a status change.
 
 ### `vwu`
 
@@ -53,12 +56,11 @@
 ### `misthub`
 
 - Name: `misthub.com`.
-- Enabled: false.
+- Enabled: true.
 - Base URL: `https://misthub.com`.
 - REST base: `/rest/V1` (`storeCode: ""`).
 - Timezone: `America/Los_Angeles`.
 - Access-token secret: `MAGENTO_MISTHUB_ACCESS_TOKEN`.
-- Do not re-enable without explicit user approval.
 
 ## Fraud Rules
 
@@ -97,11 +99,12 @@
 - Queue and case pages include Magento admin links opening in a new tab.
 - Staff queue timestamps are formatted in each site's configured `MAGENTO_SITES_JSON.timeZone`, with UTC retained in the HTML timestamp and tooltip.
 - Approve releases the Magento hold and expects status `processing`; completed cases hide further action buttons and show a success message.
-- Decline is not considered production-ready:
-  - Intended flow: unhold, create an offline invoice credit memo, then accept Magento `closed` or `canceled`; staff refunds the payment manually in Authorize.net.
-  - Staging Magento returns a generic 500 from `/V1/invoice/{invoiceId}/refund`, likely inside the Rootways Authorize CIM module or another observer.
-  - Failed credit-memo attempts now try to restore the Magento hold.
-  - The user explicitly chose to leave Decline unresolved for later.
+- Decline is implemented and staging-verified but is pending production Worker deployment:
+  - The case page shows a confirmation popup reminding staff that the Authorize.net refund remains manual.
+  - The flow unholds the order, creates a full offline invoice credit memo, and accepts Magento `closed` or `canceled`; it calls cancel only if the credit memo did not already close the order.
+  - Amasty Store Credit requires `arguments.extension_attributes.amstorecredit_base_amount: 0` in the refund request. Omitting the extension object causes its refund plugin to throw a null dereference and return HTTP 500.
+  - Failed credit-memo attempts try to restore the Magento hold.
+  - Staging order `000000235` created credit memo `22`, refunded `$37.49` in Magento, and transitioned to `closed` without an Authorize.net refund.
 
 ## Safety and Manual Runs
 
@@ -128,6 +131,14 @@ Never commit secret values. Expected production secret names:
 
 `SLACK_CHANNEL_ID` is `C0BBH9RE3GV`.
 
+## Project Documentation
+
+- Keep the Slack Canvas `Fraud Hold System — Workflow, Features, Stack, and Rules` current whenever a project change affects documented workflow, features, technology stack, fraud rules, integrations, production behavior, or known limitations.
+- Canvas ID: `F0BMT4B90D9`.
+- Canvas URL: `https://vapewholesale.slack.com/docs/T0AR1FH905P/F0BMT4B90D9`.
+- Read the existing canvas before editing it, preserve unrelated content, and update only the affected sections.
+- Include the canvas update in the completion summary. If access or permissions prevent the update, report that explicitly rather than silently leaving the canvas stale.
+
 ## Verification and Deployment
 
 Run before deploy:
@@ -136,7 +147,7 @@ Run before deploy:
 npm run verify
 ```
 
-Expected: 48 tests, TypeScript success, and Wrangler dry-run success.
+Expected: 58 tests, TypeScript success, and Wrangler dry-run success.
 
 Deploy:
 

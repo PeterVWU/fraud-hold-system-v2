@@ -33,6 +33,9 @@ describe("staff verification queue", () => {
     expect(body).toContain('<time datetime="2026-07-29T00:00:00.000Z"');
     expect(body).toContain("Jul 28, 2026, 5:00 PM PDT");
     expect(body).toContain('title="2026-07-29T00:00:00.000Z (UTC)"');
+    expect(body).toContain('<select name="status">');
+    expect(body).toContain('<option value="open" selected>Open cases</option>');
+    expect(body).toContain('<option value="approved">Approved</option>');
   });
 
   it("labels the action Decline and reminds staff to refund manually", async () => {
@@ -68,11 +71,16 @@ describe("staff verification queue", () => {
     expect(body).toContain('target="_blank"');
     expect(body).toContain("Refund the payment manually in Authorize.net");
     expect(body).toContain(">Decline</button>");
+    expect(body).toContain("onsubmit=\"return confirm('");
+    expect(body).toContain("You must refund the payment manually in Authorize.net. Continue?");
     expect(body).not.toContain("Decline and refund");
     expect(body).not.toContain("Staff note");
     expect(body).toContain("Request more information");
     expect(body).toContain("ID of the Cardholder");
-    expect(body).toContain("Valid Tobacco License");
+    expect(body).toContain("Copy of the payment card used (showing the last 4 digits and cardholder&#39;s name)");
+    expect(body).toContain("Valid Business or Tobacco License");
+    expect(body).not.toContain("Valid Business License");
+    expect(body).not.toContain("Valid Tobacco License");
     expect(body).toContain('name="custom_message"');
   });
 

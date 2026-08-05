@@ -1,7 +1,31 @@
 import { describe, expect, it, vi } from "vitest";
-import { recordDocumentUploads } from "../src/verification";
+import { listStaffCases, recordDocumentUploads } from "../src/verification";
 
 describe("verification persistence", () => {
+  it("excludes completed cases from the default staff queue", async () => {
+    const all = vi.fn().mockResolvedValue({ results: [] });
+    const bind = vi.fn(() => ({ all }));
+    const prepare = vi.fn(() => ({ bind }));
+    const db = { prepare } as unknown as D1Database;
+
+    await listStaffCases(db);
+
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("status NOT IN ('approved', 'declined')"));
+    expect(bind).toHaveBeenCalledWith();
+  });
+
+  it("binds an explicit staff queue status filter", async () => {
+    const all = vi.fn().mockResolvedValue({ results: [] });
+    const bind = vi.fn(() => ({ all }));
+    const prepare = vi.fn(() => ({ bind }));
+    const db = { prepare } as unknown as D1Database;
+
+    await listStaffCases(db, "approved");
+
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("AND status = ?"));
+    expect(bind).toHaveBeenCalledWith("approved");
+  });
+
   it("records every uploaded document with its request label in one batch", async () => {
     const bindings: unknown[][] = [];
     const statement = {

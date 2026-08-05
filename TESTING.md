@@ -19,7 +19,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 48.
+- Current expected unit test count is 58.
 
 ## Local D1 Setup
 
@@ -170,6 +170,8 @@ rm /tmp/fraud-hold-staging.vars
 - Cron, Workflow, manual, and latest-order scans run only when `FRAUD_SCAN_ENABLED=true`.
 - Test mode still creates verification cases without Magento writes or customer contact.
 - Approve, decline/cancel, and order-comment actions are blocked when Magento updates are disabled. Authorize.net refunds are performed manually by staff.
+- Decline request tests cover unhold, invoice lookup, offline credit-memo creation, close-or-cancel handling, D1 action persistence, and hold restoration when credit-memo creation fails.
+- Magento client tests require `isOnline: false` and Amasty's `arguments.extension_attributes.amstorecredit_base_amount: 0` compatibility field.
 - Suspicious orders in non-holdable statuses are recorded without a Magento hold API call.
 - Below-threshold orders remain unchanged.
 - Slack alert code is tested for bot-token channel posting, webhook fallback, API errors, and clean skip when Slack is unconfigured.
@@ -178,6 +180,6 @@ rm /tmp/fraud-hold-staging.vars
 ## Live Operational Notes
 
 - Staging currently requires origin nginx basic-auth changes before live scans can evaluate orders.
-- Misthub is configured but disabled. Do not re-enable without explicit approval.
+- Misthub is configured and enabled; preserve its deployed enabled status during deployment.
 - Misthub's REST base is `/rest/V1`, represented by `storeCode: ""`.
 - Last Misthub live test before disabling evaluated 104 orders and held 14 orders.

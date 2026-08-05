@@ -143,8 +143,8 @@ export function createMagentoClient(
       });
     },
 
-    refundInvoiceOffline(invoiceId, input) {
-      return request<number>(`/invoice/${invoiceId}/refund`, {
+    async refundInvoiceOffline(invoiceId, input) {
+      const result = await request<number | string>(`/invoice/${invoiceId}/refund`, {
         method: "POST",
         body: JSON.stringify({
           items: input.items,
@@ -156,10 +156,19 @@ export function createMagentoClient(
             is_visible_on_front: 0
           },
           arguments: {
-            shipping_amount: input.shippingAmount ?? 0
+            shipping_amount: input.shippingAmount ?? 0,
+            extension_attributes: {
+              // Amasty Store Credit's refund plugins require this object even when no store credit is used.
+              amstorecredit_base_amount: 0
+            }
           }
         })
       });
+      const creditmemoId = Number(result);
+      if (!Number.isInteger(creditmemoId) || creditmemoId <= 0) {
+        throw new Error(`Magento ${site.id} returned an invalid credit memo ID: ${String(result)}`);
+      }
+      return creditmemoId;
     }
   };
 }

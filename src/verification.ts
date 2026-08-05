@@ -16,6 +16,8 @@ export type VerificationCaseStatus =
   | "declined"
   | "action_failed";
 
+export type StaffCaseStatusFilter = VerificationCaseStatus | "open" | "all";
+
 export interface VerificationCase {
   id: string;
   reviewId: string;
@@ -153,16 +155,27 @@ export async function getVerificationCaseDetail(db: D1Database, caseId: string):
   return getVerificationCaseRelations(db, verificationCase);
 }
 
-export async function listStaffCases(db: D1Database): Promise<VerificationCase[]> {
-  const result = await db
-    .prepare(
-      `SELECT id, review_id, site_id, magento_order_id, increment_id, customer_email, status,
+export async function listStaffCases(
+  db: D1Database,
+  statusFilter: StaffCaseStatusFilter = "open"
+): Promise<VerificationCase[]> {
+  const statusClause = statusFilter === "open"
+    ? "AND status NOT IN ('approved', 'declined')"
+    : statusFilter === "all"
+      ? ""
+      : "AND status = ?";
+  const statement = db.prepare(
+    `SELECT id, review_id, site_id, magento_order_id, increment_id, customer_email, status,
         email_status, email_error, email_sent_at, document_uploaded_at, token_expires_at, created_at, updated_at,
         ${matchedRuleNamesSql()}
        FROM verification_cases vc
+       WHERE 1 = 1
+       ${statusClause}
        ORDER BY updated_at DESC
        LIMIT 100`
-    )
+  );
+  const result = await statement
+    .bind(...(statusFilter === "open" || statusFilter === "all" ? [] : [statusFilter]))
     .all<VerificationCaseRow>();
 
   return (result.results ?? []).map(mapCase);

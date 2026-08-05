@@ -66,6 +66,35 @@ describe("Magento request headers", () => {
     expect(requestUrl.searchParams.get("searchCriteria[sortOrders][0][direction]")).toBe("ASC");
     expect(requestUrl.searchParams.get("searchCriteria[pageSize]")).toBe("1");
   });
+
+  it("creates an offline invoice credit memo without asking the payment gateway to refund", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify("987"), { status: 200, headers: { "Content-Type": "application/json" } })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMagentoClient(site(), "magento-token");
+    await expect(client.refundInvoiceOffline(161, {
+      items: [{ order_item_id: 3274, qty: 1 }],
+      shippingAmount: 17.99,
+      comment: "Fraud verification declined."
+    })).resolves.toBe(987);
+
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("https://example.com/rest/default/V1/invoice/161/refund");
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      items: [{ order_item_id: 3274, qty: 1 }],
+      isOnline: false,
+      notify: false,
+      appendComment: true,
+      comment: { comment: "Fraud verification declined.", is_visible_on_front: 0 },
+      arguments: {
+        shipping_amount: 17.99,
+        extension_attributes: { amstorecredit_base_amount: 0 }
+      }
+    });
+  });
 });
 
 function site(): SiteConfig {

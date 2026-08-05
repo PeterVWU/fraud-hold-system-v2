@@ -27,7 +27,7 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Schedule: every 5 minutes
 - Last documented deployed version: `5a9a234b-d92a-46f0-9ad9-2e9ff21d0d7b` (source commit `54bc2ef`)
 - Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12`.
-- Misthub remains disabled at the site level. Staging is enabled but its deployed scans fail at origin nginx Basic Auth; this failure is isolated from VWU.
+- VWU, Misthub, and Staging VWU are enabled. Staging deployed scans still fail at origin nginx Basic Auth; this failure is isolated from the other sites.
 
 ## Configure
 
@@ -58,7 +58,9 @@ When an order reaches the fraud threshold, live mode first places an eligible or
 - Documents are validated for type and size, then stored privately in the `VERIFY_DOCS_BUCKET` R2 binding.
 - Staff sign in at `/staff/login` and review cases at `/staff`.
 - Approve releases a Magento hold and expects Magento status `processing`.
-- Decline is currently experimental and not production-ready. Its intended flow creates an offline invoice credit memo and closes or cancels the Magento order, while staff refunds the payment manually in Authorize.net. Staging currently returns a generic Magento 500 from the invoice-refund endpoint.
+- Decline shows a confirmation popup reminding staff that the Authorize.net refund remains manual, releases the Magento hold, creates a full offline invoice credit memo, and accepts Magento `closed` or `canceled`. It calls cancel only when the credit memo did not already close the order.
+- Amasty Store Credit requires `arguments.extension_attributes.amstorecredit_base_amount: 0` in refund API requests even when no store credit is used. Staging order `000000235` verified this payload by creating credit memo `22`, refunding `$37.49` in Magento, and transitioning to `closed` without contacting Authorize.net.
+- Failed credit-memo attempts try to restore the Magento hold.
 - Both Magento actions are blocked unless Magento updates are enabled. Completed cases hide the action buttons and display a result message.
 - Queue rows and case pages include links to open the exact order in Magento in a new tab.
 - When email is disabled, staff can use **Open customer upload page** to test the customer flow without contacting anyone.
@@ -86,7 +88,7 @@ Safety switch matrix:
 | `CUSTOMER_EMAIL_ENABLED` | `false` | `true` |
 | `HOLD_ACTION_MODE` | `dry_run` or `live` | `live` |
 
-Changing any safety switch is an explicit production action. Setting all three switches to `false` installs the application without scanning orders, changing Magento, or emailing customers. The checked-in production configuration currently sets all three to `true`. Do not enable Misthub without explicit approval.
+Changing any safety switch is an explicit production action. Setting all three switches to `false` installs the application without scanning orders, changing Magento, or emailing customers. The checked-in production configuration currently sets all three to `true`.
 
 The secret name must be `SLACK_BOT_TOKEN`; paste the `xoxb-...` token only when Wrangler prompts for the secret value.
 
@@ -121,11 +123,11 @@ https://as.vapewholesaleusa.com/admin_N7zuJfehzDnf
 
 ### Misthub
 
-- Enabled in config: no
+- Enabled in config: yes
 - Magento base URL: `https://misthub.com`
 - Secret name: `MAGENTO_MISTHUB_ACCESS_TOKEN`
 - REST base path: `/rest/V1` (`storeCode` is an empty string in config)
-- Status: disabled after a live test run. Do not re-enable without explicit approval.
+- Status: enabled; site-level failures remain isolated from VWU and Staging VWU.
 
 Admin base URL:
 

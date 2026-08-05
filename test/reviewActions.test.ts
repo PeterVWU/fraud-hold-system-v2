@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
-import { approveVerificationCase } from "../src/reviewActions";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { approveVerificationCase, declineVerificationCase } from "../src/reviewActions";
 import type { Env, SiteConfig } from "../src/types";
 
 describe("staff review actions", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
   it("blocks staff Magento actions unless the update switch is explicitly enabled", async () => {
     await expect(
       approveVerificationCase(
@@ -29,7 +31,99 @@ describe("staff review actions", () => {
       )
     ).rejects.toThrow("Magento order updates are disabled");
   });
+
+  it("creates a credit memo, cancels when necessary, and records the decline", async () => {
+    const responses = [
+      orderResponse("holded"),
+      jsonResponse(true),
+      jsonResponse({ items: [{ entity_id: 161, state: 2 }] }),
+      jsonResponse(987),
+      jsonResponse("processing"),
+      jsonResponse(true),
+      jsonResponse("canceled")
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+    vi.stubGlobal("fetch", fetchMock);
+    const database = recordingDb();
+
+    await declineVerificationCase(
+      { ...env(), DB: database.db, MAGENTO_ORDER_UPDATES_ENABLED: "true", MAGENTO_TOKEN: "token" },
+      site(),
+      verificationCase(),
+      "2026-06-18T12:00:00.000Z"
+    );
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url).replace("https://staging.example.com/rest/V1", ""))).toEqual([
+      "/orders/1",
+      "/orders/1/unhold",
+      expect.stringMatching(/^\/invoices\?/),
+      "/invoice/161/refund",
+      "/orders/1/statuses",
+      "/orders/1/cancel",
+      "/orders/1/statuses"
+    ]);
+    expect(database.bindings[0]).toEqual([
+      expect.any(String), "case-1", "decline", null, 987, null, null,
+      "2026-06-18T12:00:00.000Z", "2026-06-18T12:00:00.000Z"
+    ]);
+    expect(database.bindings).toContainEqual(["declined", "2026-06-18T12:00:00.000Z", "case-1"]);
+  });
+
+  it("restores the hold when Magento rejects credit-memo creation", async () => {
+    const responses = [
+      orderResponse("holded"),
+      jsonResponse(true),
+      jsonResponse({ items: [{ entity_id: 161, state: 2 }] }),
+      new Response(JSON.stringify({ message: "refund observer failed" }), { status: 500 }),
+      jsonResponse(true)
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(declineVerificationCase(
+      { ...env(), DB: recordingDb().db, MAGENTO_ORDER_UPDATES_ENABLED: "true", MAGENTO_TOKEN: "token" },
+      site(),
+      verificationCase(),
+      "2026-06-18T12:00:00.000Z"
+    )).rejects.toThrow("refund observer failed");
+
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("https://staging.example.com/rest/V1/orders/1/hold");
+  });
 });
+
+function verificationCase() {
+  return {
+    id: "case-1", reviewId: "review-1", siteId: "staging", magentoOrderId: 1,
+    incrementId: "0001", customerEmail: "buyer@example.com", status: "submitted" as const,
+    emailStatus: "skipped" as const, emailError: null, emailSentAt: null,
+    documentUploadedAt: "2026-06-18T12:00:00.000Z", tokenExpiresAt: "2026-06-25T12:00:00.000Z",
+    matchedRuleNames: [], createdAt: "2026-06-18T12:00:00.000Z", updatedAt: "2026-06-18T12:00:00.000Z"
+  };
+}
+
+function orderResponse(status: string): Response {
+  return jsonResponse({
+    entity_id: 1, status, base_shipping_invoiced: 17.99,
+    items: [{ item_id: 3274, qty_invoiced: 1, qty_refunded: 0 }]
+  });
+}
+
+function jsonResponse(value: unknown): Response {
+  return new Response(JSON.stringify(value), { status: 200, headers: { "Content-Type": "application/json" } });
+}
+
+function recordingDb(): { db: D1Database; bindings: unknown[][] } {
+  const bindings: unknown[][] = [];
+  const db = {
+    prepare: vi.fn(() => ({
+      bind: vi.fn((...values: unknown[]) => {
+        bindings.push(values);
+        return { run: vi.fn().mockResolvedValue({ success: true }) };
+      })
+    }))
+  } as unknown as D1Database;
+  return { db, bindings };
+}
 
 function site(): SiteConfig {
   return {

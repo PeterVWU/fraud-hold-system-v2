@@ -2,7 +2,8 @@ import { getInformationRequestLabel, INFORMATION_REQUEST_OPTIONS } from "./infor
 import type {
   VerificationCase,
   VerificationDocument,
-  VerificationInformationRequest
+  VerificationInformationRequest,
+  StaffCaseStatusFilter
 } from "./verification";
 
 export function html(body: string, status = 200, headers: HeadersInit = {}): Response {
@@ -50,7 +51,8 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 }
 
 export function renderStaffList(
-  cases: Array<VerificationCase & { adminOrderUrl: string | null; timeZone?: string }>
+  cases: Array<VerificationCase & { adminOrderUrl: string | null; timeZone?: string }>,
+  statusFilter: StaffCaseStatusFilter = "open"
 ): Response {
   const rows = cases
     .map(
@@ -60,8 +62,25 @@ export function renderStaffList(
   return html(`<main class="shell">
 <form method="post" action="/staff/logout" class="top"><button type="submit">Log out</button></form>
 <h1>Verification queue</h1>
+<form method="get" action="/staff" class="filters">
+<label>Status <select name="status">${renderStatusOptions(statusFilter)}</select></label>
+<button type="submit">Filter</button>
+</form>
 <table><thead><tr><th>Order</th><th>Magento</th><th>Site</th><th>Status</th><th>Flagged because</th><th>Email</th><th>Customer</th><th>Updated</th></tr></thead><tbody>${rows || "<tr><td colspan=\"8\">No cases need staff attention.</td></tr>"}</tbody></table>
 </main>`);
+}
+
+function renderStatusOptions(selected: StaffCaseStatusFilter): string {
+  const options: Array<{ value: StaffCaseStatusFilter; label: string }> = [
+    { value: "open", label: "Open cases" },
+    { value: "awaiting_customer", label: "Awaiting customer" },
+    { value: "submitted", label: "Submitted" },
+    { value: "action_failed", label: "Action failed" },
+    { value: "approved", label: "Approved" },
+    { value: "declined", label: "Declined" },
+    { value: "all", label: "All cases" }
+  ];
+  return options.map((option) => `<option value="${option.value}"${option.value === selected ? " selected" : ""}>${option.label}</option>`).join("");
 }
 
 export function renderStaffCase(
@@ -100,7 +119,7 @@ ${["awaiting_customer", "submitted"].includes(item.status) ? renderInformationRe
 ${["approved", "declined"].includes(item.status)
     ? `<p class="notice">This case is ${escapeHtml(item.status)}. No further order action is available.</p>`
     : `<form method="post" action="/staff/cases/${item.id}/approve"><button type="submit" ${capabilities.magentoUpdatesEnabled ? "" : "disabled"}>Approve</button></form>
-<form method="post" action="/staff/cases/${item.id}/decline"><p class="warning"><strong>Reminder:</strong> Declining creates a Magento credit memo and closes or cancels the order. Refund the payment manually in Authorize.net.</p><button class="danger" type="submit" ${capabilities.magentoUpdatesEnabled ? "" : "disabled"}>Decline</button></form>`}
+<form method="post" action="/staff/cases/${item.id}/decline" onsubmit="return confirm('This creates a Magento credit memo and closes or cancels the order. You must refund the payment manually in Authorize.net. Continue?')"><p class="warning"><strong>Reminder:</strong> Declining creates a Magento credit memo and closes or cancels the order. Refund the payment manually in Authorize.net.</p><button class="danger" type="submit" ${capabilities.magentoUpdatesEnabled ? "" : "disabled"}>Decline</button></form>`}
 </main>`);
 }
 
@@ -217,7 +236,7 @@ body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,sans-serif;color:#
 .shell{max-width:1000px;margin:0 auto;padding:32px}.narrow{max-width:560px}
 h1{font-size:26px;margin:0 0 18px}h2{font-size:18px;margin-top:28px}h3{font-size:15px;margin:16px 0 8px}
 form{margin:18px 0;display:grid;gap:12px}label{display:grid;gap:6px;font-weight:600}
-input,textarea{font:inherit;padding:10px;border:1px solid #b9c0ca;border-radius:6px;background:#fff}
+input,textarea,select{font:inherit;padding:10px;border:1px solid #b9c0ca;border-radius:6px;background:#fff}
 textarea{min-height:80px}button{width:max-content;padding:10px 14px;border:0;border-radius:6px;background:#0f766e;color:#fff;font-weight:700;cursor:pointer}.danger{background:#b42318}
 button:disabled{background:#98a2b3;cursor:not-allowed}
 table{width:100%;border-collapse:collapse;background:#fff}th,td{padding:10px;border-bottom:1px solid #e0e4ea;text-align:left}.error{padding:10px;background:#fee4e2;color:#912018}.notice{padding:10px;background:#d1fadf;color:#054f31}.top{display:flex;justify-content:flex-end}
@@ -225,5 +244,6 @@ table{width:100%;border-collapse:collapse;background:#fff}th,td{padding:10px;bor
 dl{display:grid;grid-template-columns:140px 1fr;gap:8px;background:#fff;padding:16px}
 .rules{margin:0;padding-left:18px;min-width:190px}.rules li+li{margin-top:4px}
 fieldset{display:grid;gap:8px;border:1px solid #d0d5dd;border-radius:6px;padding:12px}.check{display:flex;grid-template-columns:none;align-items:center;gap:8px;font-weight:400}.check input{padding:0}.documents li+li,.history>li+li{margin-top:10px}.preserve-lines{white-space:pre-wrap}
+.filters{display:flex;align-items:end}.filters label{min-width:220px}
 </style>`;
 }

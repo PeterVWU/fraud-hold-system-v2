@@ -24,6 +24,7 @@ import {
   recordAction,
   recordDocumentUploads,
   rotateVerificationToken,
+  type StaffCaseStatusFilter,
   updateCaseStatus
 } from "./verification";
 
@@ -242,7 +243,8 @@ async function handleStaffLogin(request: Request, env: Env): Promise<Response> {
 async function handleStaff(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/staff") {
-    const cases = await listStaffCases(env.DB);
+    const statusFilter = parseStaffCaseStatusFilter(url.searchParams.get("status"));
+    const cases = await listStaffCases(env.DB, statusFilter);
     return renderStaffList(
       cases.map((item) => {
         const site = getSiteForCase(env, item.siteId);
@@ -251,7 +253,8 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
           adminOrderUrl: buildMagentoAdminOrderUrl(site, item.magentoOrderId),
           timeZone: site.timeZone
         };
-      })
+      }),
+      statusFilter
     );
   }
 
@@ -283,6 +286,21 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
   }
 
   return Response.json({ error: "not found" }, { status: 404 });
+}
+
+function parseStaffCaseStatusFilter(value: string | null): StaffCaseStatusFilter {
+  const validFilters = new Set<StaffCaseStatusFilter>([
+    "open",
+    "all",
+    "awaiting_customer",
+    "submitted",
+    "approved",
+    "declined",
+    "action_failed"
+  ]);
+  return value && validFilters.has(value as StaffCaseStatusFilter)
+    ? value as StaffCaseStatusFilter
+    : "open";
 }
 
 async function handleStaffDocument(env: Env, caseId: string, documentId: string): Promise<Response> {
