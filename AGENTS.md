@@ -9,7 +9,7 @@
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
-- Last known deployed version: `5a9a234b-d92a-46f0-9ad9-2e9ff21d0d7b` (source commit `54bc2ef`).
+- Last known deployed version: `2d6602b6-3d57-46cd-bb1f-170a01c8400f` (source commit `01f7d39`).
 - Expected test count: 58.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
@@ -99,7 +99,7 @@
 - Queue and case pages include Magento admin links opening in a new tab.
 - Staff queue timestamps are formatted in each site's configured `MAGENTO_SITES_JSON.timeZone`, with UTC retained in the HTML timestamp and tooltip.
 - Approve releases the Magento hold and expects status `processing`; completed cases hide further action buttons and show a success message.
-- Decline is implemented and staging-verified but is pending production Worker deployment:
+- Decline is implemented, staging-verified, and deployed in production:
   - The case page shows a confirmation popup reminding staff that the Authorize.net refund remains manual.
   - The flow unholds the order, creates a full offline invoice credit memo, and accepts Magento `closed` or `canceled`; it calls cancel only if the credit memo did not already close the order.
   - Amasty Store Credit requires `arguments.extension_attributes.amstorecredit_base_amount: 0` in the refund request. Omitting the extension object causes its refund plugin to throw a null dereference and return HTTP 500.

@@ -25,7 +25,7 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Workflow: `fraud-scan-workflow`
 - D1 database: `fraud_hold_system`
 - Schedule: every 5 minutes
-- Last documented deployed version: `5a9a234b-d92a-46f0-9ad9-2e9ff21d0d7b` (source commit `54bc2ef`)
+- Last documented deployed version: `2d6602b6-3d57-46cd-bb1f-170a01c8400f` (source commit `01f7d39`)
 - Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12`.
 - VWU, Misthub, and Staging VWU are enabled. Staging deployed scans still fail at origin nginx Basic Auth; this failure is isolated from the other sites.
 
