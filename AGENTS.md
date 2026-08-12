@@ -9,10 +9,10 @@
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
-- Last known deployed version: `65929e82-5c8c-4844-b7f4-51462f15442d` (source commit `47ca265`).
+- Last known deployed version: `b8bc01f5-43b5-4925-9486-3c57cb113a76` (source commit `98f146a`).
 - Expected test count: 90.
 - ECOM-262 military-address handling and the behavioral-rule timestamp fix are deployed in production.
-- ECOM-263 initial verification requirements were manually verified in an isolated local Worker against staging-derived case `000000290`: the simulated HTML email and customer upload page showed the same four categories, and the upload page retained the generic multi-file `document` field. No real email or Magento mutation was used.
+- ECOM-263 initial verification requirements were manually verified in an isolated local Worker against staging-derived case `000000290` and deployed in production as Worker version `b8bc01f5-43b5-4925-9486-3c57cb113a76`: the simulated HTML email and customer upload page showed the same four categories, and the upload page retained the generic multi-file `document` field. No real email or Magento mutation was used during validation.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
