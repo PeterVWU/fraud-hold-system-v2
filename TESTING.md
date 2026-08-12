@@ -1,5 +1,15 @@
 # Regression Testing
 
+Use `.agents/skills/validate-fraud-hold-staging` after completing an implementation. The skill treats this file, `AGENTS.md`, `README.md`, affected source/tests, migrations, and the Slack Canvas as the regression specification. It must add newly documented behavior to its evidence matrix, start the Worker with only Staging VWU enabled for scanning, create fresh purpose-built staging data, and report every row as passed, failed, blocked, or not applicable.
+
+The bundled launcher defaults to safe detection mode:
+
+```bash
+.agents/skills/validate-fraud-hold-staging/scripts/start-local-worker.sh
+```
+
+Live Magento mutations, customer email, Slack alerts, approve, and decline require explicit approval and the launcher's documented environment gates.
+
 Run these checks before deploying or after changing fraud rules, Magento API code, D1 schema, scan/cursor behavior, or Slack alerts.
 
 ## Automated Checks
@@ -19,7 +29,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 58.
+- Current expected unit test count is 88.
 
 ## Local D1 Setup
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Validate Fraud Hold Staging"
+  short_description: "Run comprehensive staging regression checks"
+  default_prompt: "Use $validate-fraud-hold-staging to validate the latest implementation locally against Staging VWU."

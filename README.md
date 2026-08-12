@@ -25,7 +25,7 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Workflow: `fraud-scan-workflow`
 - D1 database: `fraud_hold_system`
 - Schedule: every 5 minutes
-- Last documented deployed version: `2d6602b6-3d57-46cd-bb1f-170a01c8400f` (source commit `01f7d39`)
+- Last documented deployed version: `65929e82-5c8c-4844-b7f4-51462f15442d` (source commit `47ca265`)
 - Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12`.
 - VWU, Misthub, and Staging VWU are enabled. Staging deployed scans still fail at origin nginx Basic Auth; this failure is isolated from the other sites.
 
@@ -159,7 +159,7 @@ The active rules are:
 - ZIP does not match state.
 - Multiple cards or billing names used by the same customer in one day. Signal timestamps are normalized with SQLite `datetime()` so same-day records are included.
 
-The military-address feature and behavioral-rule timestamp fix are implemented and locally verified but not yet deployed.
+The military-address feature and behavioral-rule timestamp fix are deployed in production as Worker version `65929e82-5c8c-4844-b7f4-51462f15442d` from source commit `47ca265`.
 
 The quantity-at-least-10, billing/shipping phone mismatch, and billing/shipping name mismatch rules were removed.
 
@@ -203,6 +203,8 @@ npx wrangler d1 execute fraud_hold_system --remote --command "SELECT site_id, st
 ```
 
 ## Regression Testing
+
+Use the project-local `$validate-fraud-hold-staging` skill in `.agents/skills/validate-fraud-hold-staging` after completing an implementation. It runs the automated baseline, starts a staging-isolated local Worker, creates purpose-built Staging VWU data, and audits every existing and newly documented feature. Its launcher defaults to no Magento writes or customer email and requires explicit gates for approved live phases.
 
 See `TESTING.md` for the required automated checks and staging Magento regression tests, including the positive hold case and the negative no-status-change case.
 

@@ -9,9 +9,9 @@
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
-- Last known deployed version: `2d6602b6-3d57-46cd-bb1f-170a01c8400f` (source commit `01f7d39`).
+- Last known deployed version: `65929e82-5c8c-4844-b7f4-51462f15442d` (source commit `47ca265`).
 - Expected test count: 88.
-- ECOM-262 military-address handling and the behavioral-rule timestamp fix are implemented and locally verified but not deployed.
+- ECOM-262 military-address handling and the behavioral-rule timestamp fix are deployed in production.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
@@ -149,6 +149,8 @@ Never commit secret values. Expected production secret names:
 - Include the canvas update in the completion summary. If access or permissions prevent the update, report that explicitly rather than silently leaving the canvas stale.
 
 ## Verification and Deployment
+
+For implementation-complete local and Staging VWU regression testing, use the repository skill at `.agents/skills/validate-fraud-hold-staging`. It derives coverage from `AGENTS.md`, `README.md`, `TESTING.md`, migrations, tests, affected source, and the Slack Canvas; starts a staging-isolated local Worker; creates purpose-built staging data; and requires evidence for every documented feature. Safe detection mode is the default. Live Magento mutations, customer emails, Slack alerts, approve, and decline require explicit approval gates.
 
 Run before deploy:
 
