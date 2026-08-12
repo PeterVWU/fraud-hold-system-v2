@@ -27,7 +27,7 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Schedule: every 5 minutes
 - Last documented deployed version: `b8bc01f5-43b5-4925-9486-3c57cb113a76` (source commit `98f146a`)
 - Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12`.
-- VWU, Misthub, and Staging VWU are enabled. Staging deployed scans still fail at origin nginx Basic Auth; this failure is isolated from the other sites.
+- VWU and Misthub are enabled. Staging VWU is disabled in production because deployed scans still fail at origin nginx Basic Auth; it remains available for isolated local validation.
 
 ## Configure
 
@@ -111,11 +111,13 @@ The Cloudflare security skip rule must allow `/rest/V1/` requests carrying the c
 ### Staging
 
 - Site ID: `staging-vwu`
+- Enabled in production config: no
 - Enabled in config: yes
 - Magento base URL: `https://staging.vapewholesaleusa.com`
 - REST base path: `/rest/default/V1`
 - Secret name: `MAGENTO_STAGING_ACCESS_TOKEN`
 - Current blocker: the token works locally, but deployed Worker requests receive an nginx HTML 401 before reaching Magento. Exempt `/rest/` from nginx Basic Auth or protect it with a separate custom header.
+- Local staging-validation runs may enable this site through runtime overrides without changing the checked-in production status.
 
 Admin base URL:
 

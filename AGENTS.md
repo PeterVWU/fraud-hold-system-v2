@@ -47,12 +47,13 @@
 ### `staging-vwu`
 
 - Name: `Staging VWU`.
-- Enabled: true.
+- Enabled: false.
 - Base URL: `https://staging.vapewholesaleusa.com`.
 - REST base: `/rest/default/V1`.
 - Timezone: `America/Los_Angeles`.
 - Access-token secret: `MAGENTO_STAGING_ACCESS_TOKEN`.
 - Known production blocker: requests from the deployed Worker receive an nginx HTML `401 Authorization Required` before reaching Magento. The same token works locally. Staging `/rest/` must be exempted from nginx Basic Auth or protected with a separate custom header.
+- Production scanning is disabled for this site; the site remains available to the isolated local staging-validation workflow.
 - Site failures are isolated, so this recurring staging failure does not stop VWU.
 
 ### `misthub`
