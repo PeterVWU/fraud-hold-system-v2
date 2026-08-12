@@ -320,7 +320,7 @@ export async function countRecentRelatedOrders(
       `SELECT COUNT(*) AS count
        FROM order_signals
        WHERE site_id = ?
-         AND order_created_at >= ?
+         AND datetime(order_created_at) >= datetime(?)
          AND (
            (? IS NOT NULL AND customer_key_hash = ?)
            OR (? IS NOT NULL AND customer_email_hash = ?)
@@ -357,7 +357,7 @@ export async function hasDifferentPaymentOrBillingToday(
       `SELECT COUNT(*) AS count
        FROM order_signals
        WHERE site_id = ?
-         AND order_created_at >= ?
+         AND datetime(order_created_at) >= datetime(?)
          AND (
            (? IS NOT NULL AND customer_key_hash = ?)
            OR (? IS NOT NULL AND customer_email_hash = ?)

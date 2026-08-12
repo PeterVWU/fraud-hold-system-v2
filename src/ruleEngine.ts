@@ -30,9 +30,11 @@ export async function evaluateFraudRules(
       evidence: result.evidence
     });
 
-    if (rule.effect === "exemption" && result.matched) {
+    const requiredRuleAlreadyMatched = ruleResults.some((item) => item.required && item.matched);
+    if (rule.effect === "exemption" && result.matched && !requiredRuleAlreadyMatched) {
       return {
         decision: "allow",
+        suppressInitialCustomerEmail: false,
         holdThreshold,
         matchedCount: 0,
         requiredMatchedCount: 0,
@@ -46,6 +48,9 @@ export async function evaluateFraudRules(
 
   return {
     decision: requiredMatchedCount > 0 || matchedCount >= holdThreshold ? "hold" : "allow",
+    suppressInitialCustomerEmail: ruleResults.some(
+      (result) => result.ruleId === "military_shipping_address" && result.matched
+    ),
     holdThreshold,
     matchedCount,
     requiredMatchedCount,

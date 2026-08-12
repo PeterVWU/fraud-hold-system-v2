@@ -21,12 +21,13 @@ import { sendSlackHoldAlert } from "./slack";
 import type {
   CompletedOrderHistoryLookup,
   Env,
+  FraudDecision,
   MagentoCustomer,
   MagentoOrder,
   RunStats,
   SiteConfig
 } from "./types";
-import { createVerificationCaseForHold } from "./verification";
+import { createVerificationCaseForHold, recordEmailAttempt } from "./verification";
 
 const PAGE_SIZE = 100;
 const DEFAULT_SCHEDULE_INTERVAL_MINUTES = 5;
@@ -206,7 +207,7 @@ export async function reviewOrder(
 
   if (decision.decision === "hold" && actionMode === "dry_run") {
     await markHoldSkipped(env.DB, reviewId, order.status ?? null, "dry run: Magento hold skipped");
-    await createAndMaybeEmailVerificationCase(env, site, order, reviewId, reviewedAt);
+    await createAndMaybeEmailVerificationCase(env, site, order, reviewId, reviewedAt, decision);
   } else if (decision.decision === "hold" && isAlreadyHoldStatus(order.status)) {
     await markHoldAlreadySatisfied(env.DB, reviewId, order.status ?? null, actionMode);
   } else if (decision.decision === "hold" && !isHoldableStatus(order.status)) {
@@ -227,7 +228,7 @@ export async function reviewOrder(
       if (held) {
         stats.holdsSucceeded += 1;
         try {
-          await createAndMaybeEmailVerificationCase(env, site, order, reviewId, new Date().toISOString());
+          await createAndMaybeEmailVerificationCase(env, site, order, reviewId, new Date().toISOString(), decision);
         } catch (error) {
           console.error(`Failed to create/send verification email for review ${reviewId}`, error);
         }
@@ -258,11 +259,25 @@ async function createAndMaybeEmailVerificationCase(
   site: SiteConfig,
   order: MagentoOrder,
   reviewId: string,
-  now: string
+  now: string,
+  decision: FraudDecision
 ): Promise<void> {
   try {
-    const verification = await createVerificationCaseForHold(env, site, order, reviewId, now);
+    const initialStatus = decision.suppressInitialCustomerEmail ? "pending_review" : "awaiting_customer";
+    const verification = await createVerificationCaseForHold(env, site, order, reviewId, now, initialStatus);
     if (verification.created) {
+      if (decision.suppressInitialCustomerEmail) {
+        await recordEmailAttempt(env.DB, {
+          caseId: verification.verificationCase.id,
+          recipient: order.customer_email ?? verification.verificationCase.customerEmail,
+          sender: site.verificationEmailFrom ?? "unconfigured",
+          messageId: null,
+          error: "Initial verification email suppressed by military-address review policy",
+          attemptedAt: now,
+          skipped: true
+        });
+        return;
+      }
       await sendVerificationEmail(
         env,
         site,

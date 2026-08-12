@@ -36,6 +36,21 @@ describe("staff verification queue", () => {
     expect(body).toContain('<select name="status">');
     expect(body).toContain('<option value="open" selected>Open cases</option>');
     expect(body).toContain('<option value="approved">Approved</option>');
+    expect(body).toContain('<option value="pending_review">Pending review</option>');
+  });
+
+  it("offers a manual information request for pending military review", async () => {
+    const response = renderStaffCase({
+      id: "case-military", reviewId: "review-1", siteId: "vwu", magentoOrderId: 123, incrementId: "000123",
+      customerEmail: "buyer@example.com", status: "pending_review", emailStatus: "skipped",
+      emailError: "Initial verification email suppressed by military-address review policy", emailSentAt: null,
+      documentUploadedAt: null, tokenExpiresAt: "2026-08-19T00:00:00Z",
+      matchedRuleNames: ["Overseas military shipping address"], createdAt: "2026-08-12T00:00:00Z", updatedAt: "2026-08-12T00:00:00Z"
+    }, [], [], { magentoUpdatesEnabled: true, customerEmailEnabled: true });
+    const body = await response.text();
+    expect(body).toContain("pending_review");
+    expect(body).toContain("Request more information");
+    expect(body).toContain("military-address review policy");
   });
 
   it("labels the action Decline and reminds staff to refund manually", async () => {

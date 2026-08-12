@@ -73,6 +73,7 @@ export function renderStaffList(
 function renderStatusOptions(selected: StaffCaseStatusFilter): string {
   const options: Array<{ value: StaffCaseStatusFilter; label: string }> = [
     { value: "open", label: "Open cases" },
+    { value: "pending_review", label: "Pending review" },
     { value: "awaiting_customer", label: "Awaiting customer" },
     { value: "submitted", label: "Submitted" },
     { value: "action_failed", label: "Action failed" },
@@ -115,7 +116,7 @@ ${magentoNotice}${emailNotice}
 <section><h2>Documents</h2>${renderDocuments(item.id, documents, informationRequests)}</section>
 <section><h2>Information request history</h2>${renderInformationRequestHistory(informationRequests)}</section>
 ${capabilities.customerEmailEnabled ? "" : `<form method="post" action="/staff/cases/${item.id}/open-test-link"><button type="submit">Open customer upload page</button></form>`}
-${["awaiting_customer", "submitted"].includes(item.status) ? renderInformationRequestForm(item.id, capabilities.customerEmailEnabled) : ""}
+${["pending_review", "awaiting_customer", "submitted"].includes(item.status) ? renderInformationRequestForm(item.id, capabilities.customerEmailEnabled) : ""}
 ${["approved", "declined"].includes(item.status)
     ? `<p class="notice">This case is ${escapeHtml(item.status)}. No further order action is available.</p>`
     : `<form method="post" action="/staff/cases/${item.id}/approve"><button type="submit" ${capabilities.magentoUpdatesEnabled ? "" : "disabled"}>Approve</button></form>

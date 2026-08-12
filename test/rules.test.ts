@@ -127,8 +127,8 @@ describe("fraud rule engine", () => {
       matchedCount: 0,
       requiredMatchedCount: 0
     });
-    expect(decision.ruleResults).toHaveLength(1);
-    expect(decision.ruleResults[0]).toMatchObject({
+    expect(decision.ruleResults).toHaveLength(2);
+    expect(decision.ruleResults[1]).toMatchObject({
       ruleId: "completed_order_older_than_exemption_threshold",
       matched: true
     });
@@ -177,7 +177,7 @@ describe("fraud rule engine", () => {
     );
 
     expect(decision.decision).toBe("allow");
-    expect(decision.ruleResults[0]).toMatchObject({
+    expect(decision.ruleResults[1]).toMatchObject({
       ruleId: "completed_order_older_than_exemption_threshold",
       matched: true,
       evidence: {
@@ -204,7 +204,7 @@ describe("fraud rule engine", () => {
     });
 
     expect(decision.decision).toBe("allow");
-    expect(decision.ruleResults[0]).toMatchObject({
+    expect(decision.ruleResults[1]).toMatchObject({
       ruleId: "completed_order_older_than_exemption_threshold",
       matched: true,
       evidence: {
@@ -244,6 +244,64 @@ describe("fraud rule engine", () => {
 
     expect(matched).toEqual(["billing_shipping_address_mismatch"]);
     expect(decision.decision).toBe("allow");
+  });
+
+  it.each([
+    ["AA", "34000"], ["AA", "34099-1234"],
+    ["AE", "09000"], ["AE", "09899-9999"],
+    ["AP", "96200"], ["AP", "96699-0001"],
+    [" ae ", " 09042-1234 "]
+  ])("holds required military shipping pair %s %s", async (regionCode, postcode) => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const order = withShipping(baseOrder, regionCode, postcode);
+    const decision = await evaluateFraudRules(env(), site, order, { db, now: new Date(), signal, customer: null });
+    const military = decision.ruleResults.find((result) => result.ruleId === "military_shipping_address");
+
+    expect(decision).toMatchObject({
+      decision: "hold",
+      requiredMatchedCount: 1,
+      suppressInitialCustomerEmail: true
+    });
+    expect(military).toMatchObject({
+      matched: true,
+      required: true,
+      evidence: { shippingState: regionCode.trim().toUpperCase(), normalizedZip: postcode.trim().slice(0, 5) }
+    });
+  });
+
+  it.each([
+    ["AA", "33999"], ["AA", "34100"], ["AE", "08999"], ["AE", "09900"],
+    ["AP", "96199"], ["AP", "96700"], ["AA", "09000"], ["AE", "96200"],
+    ["AP", "34000"], ["AE", "0900"], ["AE", "09000-123"], ["AE", "09000-ABCDE"]
+  ])("does not match invalid military shipping pair %s %s", async (regionCode, postcode) => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const decision = await evaluateFraudRules(env(), site, withShipping(baseOrder, regionCode, postcode), {
+      db, now: new Date(), signal, customer: null
+    });
+    expect(decision.ruleResults.find((result) => result.ruleId === "military_shipping_address")?.matched).toBe(false);
+  });
+
+  it("does not match a military billing address when shipping is non-military", async () => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const order = withShipping({
+      ...baseOrder,
+      billing_address: { ...baseOrder.billing_address, region_code: "AE", postcode: "09012" }
+    }, "CA", "90001");
+    const decision = await evaluateFraudRules(env(), site, order, { db, now: new Date(), signal, customer: null });
+    expect(decision.ruleResults.find((result) => result.ruleId === "military_shipping_address")?.matched).toBe(false);
+  });
+
+  it("military shipping overrides the completed-order-history exemption", async () => {
+    const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
+    const decision = await evaluateFraudRules(env(), site, withShipping(baseOrder, "AP", "96326"), {
+      db,
+      now: new Date(),
+      signal,
+      customer: null,
+      completedOrderHistory: { status: "available", history: { totalCount: 20, oldestCompletedOrderCreatedAt: "2020-01-01T00:00:00Z" } }
+    });
+    expect(decision.decision).toBe("hold");
+    expect(decision.ruleResults.find((result) => result.ruleId === "completed_order_older_than_exemption_threshold")?.matched).toBe(true);
   });
 
   it.each([
@@ -347,4 +405,14 @@ function fakeDb(options: { recentCount: number; differentPaymentOrBilling: boole
       };
     }
   } as unknown as D1Database;
+}
+
+function withShipping(order: MagentoOrder, regionCode: string, postcode: string): MagentoOrder {
+  return {
+    ...order,
+    extension_attributes: {
+      ...order.extension_attributes,
+      shipping_assignments: [{ shipping: { address: { ...order.billing_address, region_code: regionCode, postcode } } }]
+    }
+  };
 }

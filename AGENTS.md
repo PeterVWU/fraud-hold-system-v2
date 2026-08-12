@@ -10,7 +10,8 @@
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
 - Last known deployed version: `2d6602b6-3d57-46cd-bb1f-170a01c8400f` (source commit `01f7d39`).
-- Expected test count: 58.
+- Expected test count: 88.
+- ECOM-262 military-address handling and the behavioral-rule timestamp fix are implemented and locally verified but not deployed.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
@@ -66,10 +67,15 @@
 
 - Rules are hard-coded in `src/rules.ts`.
 - Hold threshold: 2 matched non-required rules unless overridden per site.
-- No current rule is required.
+- The overseas military shipping-address rule is required; all other active fraud rules are non-required.
 - Active rules:
+  - Overseas military shipping address.
+    - Matches shipping state/ZIP pairs `AA`/`34000`–`34099`, `AE`/`09000`–`09899`, and `AP`/`96200`–`96699`.
+    - Accepts normalized five-digit and ZIP+4 values and stores normalized evidence.
+    - Holds by itself and overrides the completed-order-history exemption.
+    - Creates a `pending_review` case and suppresses the initial customer email even when other rules also match.
   - Registered-customer completed-order-history exemption.
-    - Skips all remaining fraud rules when the customer has a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order.
+    - Skips remaining non-required fraud rules when the customer has a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order, unless the military rule matched.
     - Uses Magento `customer_id` only; guest-email history does not qualify.
     - The Magento history query returns both the oldest completed order and the total completed-order count.
     - Lookup failures are logged and normal fraud evaluation continues.
@@ -81,6 +87,7 @@
   - Order total at least $150.
   - ZIP does not match state.
   - Multiple cards or billing names used by the same customer in one day.
+    - The one-hour and same-day signal queries normalize Magento and ISO timestamp formats with SQLite `datetime()` before comparison.
 - Removed rules:
   - Total quantity at least 10.
   - Billing/shipping phone mismatch.
@@ -93,8 +100,10 @@
 - An eligible suspicious order is added to the staff queue only after Magento hold succeeds.
 - After a successful hold:
   1. Create a verification case and expiring hashed customer token.
-  2. Send the per-site verification email when enabled.
-  3. Send Slack only after Magento hold succeeds.
+  2. For normal holds, create the case as `awaiting_customer` and send the per-site verification email when enabled.
+  3. For military-address holds, create the case as `pending_review` and record the initial email as skipped by policy.
+  4. Staff may manually request information from `pending_review`; successful delivery transitions to `awaiting_customer`, while failure leaves the case pending for retry.
+  5. Send Slack only after Magento hold succeeds.
 - Staff queue: `/staff`; login: `/staff/login`.
 - Queue and case pages include Magento admin links opening in a new tab.
 - Staff queue timestamps are formatted in each site's configured `MAGENTO_SITES_JSON.timeZone`, with UTC retained in the HTML timestamp and tooltip.
@@ -147,7 +156,7 @@ Run before deploy:
 npm run verify
 ```
 
-Expected: 58 tests, TypeScript success, and Wrangler dry-run success.
+Expected: 88 tests, TypeScript success, and Wrangler dry-run success.
 
 Deploy:
 

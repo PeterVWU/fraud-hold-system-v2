@@ -292,6 +292,7 @@ function parseStaffCaseStatusFilter(value: string | null): StaffCaseStatusFilter
   const validFilters = new Set<StaffCaseStatusFilter>([
     "open",
     "all",
+    "pending_review",
     "awaiting_customer",
     "submitted",
     "approved",
@@ -345,7 +346,7 @@ async function handleStaffAction(request: Request, env: Env, caseId: string, act
         buildMagentoAdminOrderUrl(site, detail.case.magentoOrderId)
       );
     }
-    if (!["awaiting_customer", "submitted"].includes(detail.case.status)) {
+    if (!["pending_review", "awaiting_customer", "submitted"].includes(detail.case.status)) {
       return renderStaffCase(
         detail.case,
         detail.documents,

@@ -36,6 +36,29 @@ describe("Magento request headers", () => {
     );
   });
 
+  it("retries a GET once when Cloudflare returns a managed challenge", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response("<title>Just a moment...</title>", {
+        status: 403,
+        headers: { "Content-Type": "text/html" }
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [{ entity_id: 161, state: 2 }] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createMagentoClient(site(), "magento-token", {
+      "x-vwu-agent-auth": "site-auth-secret"
+    });
+
+    await expect(client.listInvoices(450200)).resolves.toEqual([{ entity_id: 161, state: 2 }]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
+      headers: expect.objectContaining({ "x-vwu-agent-auth": "site-auth-secret" })
+    }));
+  });
+
   it("fetches the oldest completed order and total count before the current order", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(

@@ -10,6 +10,7 @@ import {
 } from "./informationRequests";
 
 export type VerificationCaseStatus =
+  | "pending_review"
   | "awaiting_customer"
   | "submitted"
   | "approved"
@@ -74,7 +75,8 @@ export async function createVerificationCaseForHold(
   site: SiteConfig,
   order: MagentoOrder,
   reviewId: string,
-  now: string
+  now: string,
+  initialStatus: "pending_review" | "awaiting_customer" = "awaiting_customer"
 ): Promise<{ verificationCase: VerificationCase; token: string; created: boolean }> {
   const existing = await getVerificationCaseByReviewId(env.DB, reviewId);
   if (existing) {
@@ -100,7 +102,7 @@ export async function createVerificationCaseForHold(
       order.customer_email ?? null,
       tokenHash,
       tokenExpiresAt,
-      "awaiting_customer",
+      initialStatus,
       now,
       now
     )
@@ -123,7 +125,7 @@ export async function getVerificationCaseByToken(db: D1Database, token: string):
        FROM verification_cases vc
        WHERE customer_token_hash = ?
          AND token_expires_at > ?
-         AND status IN ('awaiting_customer', 'submitted')`
+         AND status IN ('pending_review', 'awaiting_customer', 'submitted')`
     )
     .bind(await sha256Hex(token), new Date().toISOString())
     .first<VerificationCaseRow>();
@@ -297,9 +299,10 @@ export async function completeInformationRequest(
       `UPDATE verification_cases
        SET email_status = ?, email_error = ?,
          email_sent_at = CASE WHEN ? IS NULL THEN ? ELSE email_sent_at END,
+         status = CASE WHEN ? IS NULL AND status = 'pending_review' THEN 'awaiting_customer' ELSE status END,
          updated_at = ?
        WHERE id = ?`
-    ).bind(status, result.error, result.error, result.at, result.at, request.caseId)
+    ).bind(status, result.error, result.error, result.at, result.error, result.at, request.caseId)
   ]);
 }
 

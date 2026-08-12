@@ -8,8 +8,8 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - D1 stores site cursors, order reviews, rule evidence, reusable recent-order signals, and run logs.
 - Magento REST is used for order search, order detail, hold, status, and internal comments.
 - Rules live in `src/rules.ts`; each rule has an `id`, `name`, `enabled`, `required`, and `evaluate` function.
-- The hold threshold is 2 matched non-required rules. Required-rule support is built in but no current rule is required.
-- Registered customers with sufficiently old completed-order history bypass the remaining fraud rules; `CUSTOMER_HISTORY_EXEMPTION_MONTHS` controls the calendar-month threshold and defaults to 12.
+- The hold threshold is 2 matched non-required rules. The overseas military shipping-address rule is required and holds by itself.
+- Registered customers with sufficiently old completed-order history bypass remaining non-required fraud rules; `CUSTOMER_HISTORY_EXEMPTION_MONTHS` controls the calendar-month threshold and defaults to 12. A military-address match overrides this exemption.
 - Magento writes require both `MAGENTO_ORDER_UPDATES_ENABLED=true` and `HOLD_ACTION_MODE=live`.
 - Customer verification email requires `CUSTOMER_EMAIL_ENABLED=true`.
 - Scheduled, manual, and latest-order scans require `FRAUD_SCAN_ENABLED=true`.
@@ -55,6 +55,7 @@ npx wrangler secret put STAFF_SESSION_SECRET
 When an order reaches the fraud threshold, live mode first places an eligible order on Magento hold and creates the verification case only after that hold succeeds. In test mode it creates the case without changing Magento.
 
 - Customer links use random tokens stored only as hashes and expire after seven days.
+- Military-address cases start as `pending_review`; their initial customer email is recorded as skipped by policy. Staff can manually request information, transitioning the case to `awaiting_customer` only after successful delivery.
 - Documents are validated for type and size, then stored privately in the `VERIFY_DOCS_BUCKET` R2 binding.
 - Staff sign in at `/staff/login` and review cases at `/staff`.
 - Approve releases a Magento hold and expects Magento status `processing`.
@@ -149,13 +150,16 @@ Magento admin: Open order
 
 The active rules are:
 
-- Registered customers with a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order are exempted from the remaining fraud rules. The setting defaults to 12 when omitted or invalid. The exemption uses Magento customer ID only; guest-email history does not qualify.
+- Required overseas military shipping address. Matches normalized shipping pairs `AA`/`34000`–`34099`, `AE`/`09000`–`09899`, and `AP`/`96200`–`96699`, including ZIP+4. It holds by itself, overrides the history exemption, creates a `pending_review` case, and suppresses the initial customer email.
+- Registered customers with a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order are exempted from remaining non-required fraud rules unless the military rule matched. The setting defaults to 12 when omitted or invalid. The exemption uses Magento customer ID only; guest-email history does not qualify.
 - Billing/shipping address mismatch. This signal is suppressed for established customers with at least 10 completed Magento orders before the current order.
 - Account age under 24 hours.
-- Two or more orders from the same customer or IP within one hour.
+- Two or more orders from the same customer or IP within one hour. Signal timestamps are normalized with SQLite `datetime()` so Magento and ISO formats compare correctly.
 - Order total at least $150.
 - ZIP does not match state.
-- Multiple cards or billing names used by the same customer in one day.
+- Multiple cards or billing names used by the same customer in one day. Signal timestamps are normalized with SQLite `datetime()` so same-day records are included.
+
+The military-address feature and behavioral-rule timestamp fix are implemented and locally verified but not yet deployed.
 
 The quantity-at-least-10, billing/shipping phone mismatch, and billing/shipping name mismatch rules were removed.
 

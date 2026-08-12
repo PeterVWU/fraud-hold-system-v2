@@ -15,6 +15,39 @@ import { stateForUsZip } from "./zipState";
 
 export const INITIAL_RULES: FraudRule[] = [
   {
+    id: "military_shipping_address",
+    name: "Overseas military shipping address",
+    enabled: true,
+    required: true,
+    async evaluate(order) {
+      const address = getShippingAddress(order);
+      const state = normalizeWhitespace(address?.region_code ?? address?.region).toUpperCase();
+      const rawPostcode = normalizeWhitespace(address?.postcode);
+      const zipMatch = rawPostcode.match(/^(\d{5})(?:-\d{4})?$/);
+      const zip = zipMatch?.[1] ?? null;
+      const zipNumber = zip ? Number(zip) : null;
+      const expectedState = zipNumber === null
+        ? null
+        : zipNumber >= 34000 && zipNumber <= 34099
+          ? "AA"
+          : zipNumber >= 9000 && zipNumber <= 9899
+            ? "AE"
+            : zipNumber >= 96200 && zipNumber <= 96699
+              ? "AP"
+              : null;
+      return {
+        matched: Boolean(expectedState && state === expectedState),
+        evidence: {
+          shippingState: state || null,
+          shippingPostcode: rawPostcode || null,
+          normalizedZip: zip,
+          expectedMilitaryState: expectedState,
+          stateZipPairMatches: Boolean(expectedState && state === expectedState)
+        }
+      };
+    }
+  },
+  {
     id: "completed_order_older_than_exemption_threshold",
     name: "Customer has a completed order older than the configured exemption threshold",
     enabled: true,

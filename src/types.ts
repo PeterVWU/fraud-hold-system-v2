@@ -161,6 +161,7 @@ export interface FraudRule {
 
 export interface FraudDecision {
   decision: "hold" | "allow";
+  suppressInitialCustomerEmail: boolean;
   holdThreshold: number;
   matchedCount: number;
   requiredMatchedCount: number;

@@ -27,7 +27,8 @@ vi.mock("../src/verification", () => ({
     verificationCase: { id: "case-1", incrementId: "000009001", magentoOrderId: 9001, customerEmail: "buyer@example.com" },
     token: "token-1",
     created: true
-  })
+  }),
+  recordEmailAttempt: vi.fn().mockResolvedValue(undefined)
 }));
 
 vi.mock("../src/email", () => ({
@@ -39,6 +40,7 @@ import { sendVerificationEmail } from "../src/email";
 import { getScanStart, reviewOrder } from "../src/scanner";
 import { sendSlackHoldAlert } from "../src/slack";
 import { createVerificationCaseForHold } from "../src/verification";
+import { recordEmailAttempt } from "../src/verification";
 
 describe("scanner hold notifications", () => {
   beforeEach(() => {
@@ -88,7 +90,8 @@ describe("scanner hold notifications", () => {
       expect.objectContaining({ id: "staging" }),
       expect.objectContaining({ entity_id: 9001 }),
       expect.any(String),
-      expect.any(String)
+      expect.any(String),
+      "awaiting_customer"
     );
     expect(sendVerificationEmail).toHaveBeenCalledOnce();
     expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 1, holdsSucceeded: 1 });
@@ -122,6 +125,26 @@ describe("scanner hold notifications", () => {
     expect(createVerificationCaseForHold).not.toHaveBeenCalled();
     expect(sendVerificationEmail).not.toHaveBeenCalled();
     expect(stats).toMatchObject({ ordersEvaluated: 1, holdsAttempted: 0, holdsSucceeded: 0 });
+  });
+
+  it("creates military holds pending review, skips initial email, and still sends Slack", async () => {
+    const client = {
+      listOrders: vi.fn(), getOrder: vi.fn(), getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2024-01-01 00:00:00" }),
+      getCompletedOrderHistory: vi.fn().mockResolvedValue({ totalCount: 20, oldestCompletedOrderCreatedAt: "2020-01-01 00:00:00" }),
+      holdOrder: vi.fn().mockResolvedValue(true), unholdOrder: vi.fn(), getOrderStatus: vi.fn().mockResolvedValue("holded"),
+      addOrderComment: vi.fn().mockResolvedValue(true), cancelOrder: vi.fn(), listInvoices: vi.fn(), refundInvoiceOffline: vi.fn()
+    };
+    const stats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };
+    const order = suspiciousOrder();
+    const shipping = (order.extension_attributes?.shipping_assignments as Array<{ shipping: { address: Record<string, unknown> } }> | undefined)?.[0]?.shipping.address;
+    if (shipping) Object.assign(shipping, { region_code: "AE", postcode: "09012" });
+
+    await reviewOrder(env(), site(), client, order, new Date("2026-06-18T12:00:00Z"), stats);
+
+    expect(createVerificationCaseForHold).toHaveBeenCalledWith(expect.anything(), expect.anything(), order, expect.any(String), expect.any(String), "pending_review");
+    expect(sendVerificationEmail).not.toHaveBeenCalled();
+    expect(recordEmailAttempt).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ skipped: true, error: expect.stringContaining("military-address") }));
+    expect(sendSlackHoldAlert).toHaveBeenCalledOnce();
   });
 
   it("continues normal fraud evaluation when completed-order history fails", async () => {

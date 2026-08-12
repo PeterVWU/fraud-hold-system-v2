@@ -97,6 +97,7 @@ function order(): MagentoOrder {
 function decision(): FraudDecision {
   return {
     decision: "hold",
+    suppressInitialCustomerEmail: false,
     holdThreshold: 2,
     matchedCount: 2,
     requiredMatchedCount: 0,

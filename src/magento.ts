@@ -37,24 +37,32 @@ export function createMagentoClient(
   const base = `${normalizeBaseUrl(site.baseUrl)}/rest${storePath}/V1`;
 
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const response = await fetch(`${base}${path}`, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-        "User-Agent": "FraudHoldSystem/1.0",
-        Authorization: `Bearer ${accessToken}`,
-        ...requestHeaders,
-        ...(init.headers ?? {})
+    const method = init.method ?? "GET";
+    const maxAttempts = method === "GET" ? 2 : 1;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      const response = await fetch(`${base}${path}`, {
+        ...init,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+          "User-Agent": "FraudHoldSystem/1.0",
+          Authorization: `Bearer ${accessToken}`,
+          ...requestHeaders,
+          ...(init.headers ?? {})
+        }
+      });
+
+      if (response.ok) {
+        return (await response.json()) as T;
       }
-    });
 
-    if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Magento ${site.id} ${init.method ?? "GET"} ${path} failed: ${response.status} ${body}`);
+      if (attempt < maxAttempts && isCloudflareChallenge(response, body)) {
+        continue;
+      }
+      throw new Error(`Magento ${site.id} ${method} ${path} failed: ${response.status} ${body}`);
     }
-
-    return (await response.json()) as T;
+    throw new Error(`Magento ${site.id} ${method} ${path} failed after retry`);
   }
 
   return {
@@ -171,4 +179,11 @@ export function createMagentoClient(
       return creditmemoId;
     }
   };
+}
+
+function isCloudflareChallenge(response: Response, body: string): boolean {
+  return response.status === 403 && (
+    response.headers.get("cf-mitigated") === "challenge" ||
+    /<title>\s*Just a moment\.\.\.\s*<\/title>/i.test(body)
+  );
 }

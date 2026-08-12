@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { listStaffCases, recordDocumentUploads } from "../src/verification";
+import { completeInformationRequest, getVerificationCaseByToken, listStaffCases, recordDocumentUploads } from "../src/verification";
 
 describe("verification persistence", () => {
   it("excludes completed cases from the default staff queue", async () => {
@@ -24,6 +24,41 @@ describe("verification persistence", () => {
 
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("AND status = ?"));
     expect(bind).toHaveBeenCalledWith("approved");
+  });
+
+  it("supports pending-review staff filtering", async () => {
+    const all = vi.fn().mockResolvedValue({ results: [] });
+    const bind = vi.fn(() => ({ all }));
+    const prepare = vi.fn(() => ({ bind }));
+    await listStaffCases({ prepare } as unknown as D1Database, "pending_review");
+    expect(bind).toHaveBeenCalledWith("pending_review");
+  });
+
+  it("allows unexpired pending-review tokens", async () => {
+    const first = vi.fn().mockResolvedValue(null);
+    const bind = vi.fn(() => ({ first }));
+    const prepare = vi.fn(() => ({ bind }));
+    await getVerificationCaseByToken({ prepare } as unknown as D1Database, "token");
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("'pending_review', 'awaiting_customer', 'submitted'"));
+  });
+
+  it.each([
+    [null, "awaiting_customer"],
+    ["provider unavailable", "pending_review"]
+  ])("transitions pending review only after a successful request (%s)", async (error, expectedStatus) => {
+    const bindings: unknown[][] = [];
+    const statement = { bind: (...values: unknown[]) => { bindings.push(values); return statement; } };
+    const db = { prepare: vi.fn(() => statement), batch: vi.fn().mockResolvedValue([]) } as unknown as D1Database;
+    await completeInformationRequest(db, {
+      id: "request-1", caseId: "case-1", recipient: "buyer@example.com", sender: "no-reply@example.com",
+      requestedDocumentTypes: ["cardholder_id"], customMessage: null, status: "pending", messageId: null,
+      error: null, createdAt: "2026-08-12T00:00:00Z", sentAt: null, updatedAt: "2026-08-12T00:00:00Z"
+    }, { messageId: error ? null : "message-1", error, at: "2026-08-12T00:01:00Z" });
+    const caseUpdateSql = vi.mocked(db.prepare).mock.calls.map(([sql]) => String(sql)).find((sql) => sql.includes("status = CASE"));
+    expect(caseUpdateSql).toContain("status = 'pending_review' THEN 'awaiting_customer'");
+    const caseBindings = bindings.find((values) => values.at(-1) === "case-1" && values.length === 7);
+    expect(caseBindings?.[4]).toBe(error);
+    expect(error ? "pending_review" : "awaiting_customer").toBe(expectedStatus);
   });
 
   it("records every uploaded document with its request label in one batch", async () => {
