@@ -7,6 +7,13 @@ export const INFORMATION_REQUEST_OPTIONS = [
   { id: "business_or_tobacco_license", label: "Valid Business or Tobacco License" }
 ] as const;
 
+export const INITIAL_VERIFICATION_REQUIREMENTS = [
+  "Proof of billing and shipping address",
+  "Payment card showing only the last four digits and cardholder’s name",
+  "Government-issued photo ID",
+  "Selfie of the cardholder holding the ID"
+] as const;
+
 const LEGACY_INFORMATION_REQUEST_OPTIONS = [
   { id: "business_license", label: "Valid Business License" },
   { id: "tobacco_license", label: "Valid Tobacco License" }

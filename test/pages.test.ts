@@ -3,6 +3,18 @@ import { renderCustomerUploadPage, renderStaffCase, renderStaffList } from "../s
 import type { VerificationInformationRequest } from "../src/verification";
 
 describe("staff verification queue", () => {
+  it("shows the shared initial requirements with the existing multi-file field", async () => {
+    const response = renderCustomerUploadPage("000123", "token");
+    const body = await response.text();
+
+    expect(body).toContain("Required verification documents");
+    expect(body).toContain("Proof of billing and shipping address");
+    expect(body).toContain("Payment card showing only the last four digits and cardholder’s name");
+    expect(body).toContain("Government-issued photo ID");
+    expect(body).toContain("Selfie of the cardholder holding the ID");
+    expect(body).toContain('label>Documents <input required type="file" multiple name="document"');
+  });
+
   it("renders a new-tab Magento admin link for each configured case", async () => {
     const response = renderStaffList([
       {
@@ -122,6 +134,8 @@ describe("staff verification queue", () => {
     expect(customerBody).toContain('name="document:additional"');
     expect(customerBody).toContain('action="/verify/token?request=request-1"');
     expect(customerBody).toContain("Please include both sides.");
+    expect(customerBody).not.toContain("Required verification documents");
+    expect(customerBody).not.toContain("Government-issued photo ID");
 
     const response = renderStaffCase(
       {

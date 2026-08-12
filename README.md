@@ -55,6 +55,7 @@ npx wrangler secret put STAFF_SESSION_SECRET
 When an order reaches the fraud threshold, live mode first places an eligible order on Magento hold and creates the verification case only after that hold succeeds. In test mode it creates the case without changing Magento.
 
 - Customer links use random tokens stored only as hashes and expire after seven days.
+- The initial verification email and upload page both list four required categories: proof of billing and shipping address; a payment card showing only the last four digits and cardholder’s name; a government-issued photo ID; and a selfie of the cardholder holding the ID. This is guidance only: the initial page retains its flexible multi-file upload field and existing validation limits.
 - Military-address cases start as `pending_review`; their initial customer email is recorded as skipped by policy. Staff can manually request information, transitioning the case to `awaiting_customer` only after successful delivery.
 - Documents are validated for type and size, then stored privately in the `VERIFY_DOCS_BUCKET` R2 binding.
 - Staff sign in at `/staff/login` and review cases at `/staff`.

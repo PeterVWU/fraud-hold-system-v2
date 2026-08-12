@@ -67,7 +67,7 @@ process.stderr.write(`Site isolation: ${sites.map((site) => `${site.id}=${site.e
 process.stdout.write(JSON.stringify(sites));
 ')
 
-exec env HOME=/tmp npx wrangler dev \
+exec env XDG_CONFIG_HOME=/tmp/fraud-hold-wrangler-config npx wrangler dev \
   --port "$port" \
   --var LOCAL_RUN_DIRECT:true \
   --var FRAUD_SCAN_ENABLED:true \

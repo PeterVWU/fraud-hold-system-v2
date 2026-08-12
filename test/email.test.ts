@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   renderInformationRequestEmailHtml,
   renderInformationRequestEmailText,
+  renderVerificationEmailHtml,
   renderVerificationEmailText,
   sendInformationRequestEmail,
   sendVerificationEmail
@@ -9,13 +10,38 @@ import {
 import type { Env, MagentoOrder, SiteConfig } from "../src/types";
 
 describe("verification email", () => {
-  it("explains why the order is held and includes the magic link", () => {
+  it("lists all initial requirements in plain text before the secure link", () => {
     const text = renderVerificationEmailText(site(), order(), "https://example.com/verify/token");
 
     expect(text).toContain("temporarily placed this order on hold");
-    expect(text).toContain("upload one document");
-    expect(text).toContain("https://example.com/verify/token");
+    const expected = [
+      "Proof of billing and shipping address",
+      "Payment card showing only the last four digits and cardholder’s name",
+      "Government-issued photo ID",
+      "Selfie of the cardholder holding the ID"
+    ];
+    for (const requirement of expected) expect(text).toContain(`- ${requirement}`);
+    expect(text.indexOf(expected[3])).toBeLessThan(text.indexOf("https://example.com/verify/token"));
+    expect(text).toContain("Upload your documents");
+    expect(text).toContain("submit the documents");
+    expect(text).not.toContain("one document");
     expect(text).toContain("000009001");
+  });
+
+  it("lists all initial requirements in HTML before the plural upload button", () => {
+    const html = renderVerificationEmailHtml(site(), order(), "https://example.com/verify/token");
+    const expected = [
+      "Proof of billing and shipping address",
+      "Payment card showing only the last four digits and cardholder’s name",
+      "Government-issued photo ID",
+      "Selfie of the cardholder holding the ID"
+    ];
+    for (const requirement of expected) expect(html).toContain(`<li>${requirement}</li>`);
+    expect(html.indexOf(expected[3])).toBeLessThan(html.indexOf(">Upload documents</a>"));
+    expect(html).toContain("submit the documents");
+    expect(html).not.toContain("Upload document</a>");
+    expect(html).toContain("000009001");
+    expect(html).toContain("https://example.com/verify/token");
   });
 
   it("records a skipped attempt without calling the email binding when delivery is disabled", async () => {

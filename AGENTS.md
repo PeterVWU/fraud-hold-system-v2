@@ -10,8 +10,9 @@
 - Workflow: `fraud-scan-workflow`.
 - Cron: `*/5 * * * *`.
 - Last known deployed version: `65929e82-5c8c-4844-b7f4-51462f15442d` (source commit `47ca265`).
-- Expected test count: 88.
+- Expected test count: 90.
 - ECOM-262 military-address handling and the behavioral-rule timestamp fix are deployed in production.
+- ECOM-263 initial verification requirements were manually verified in an isolated local Worker against staging-derived case `000000290`: the simulated HTML email and customer upload page showed the same four categories, and the upload page retained the generic multi-file `document` field. No real email or Magento mutation was used.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
@@ -101,6 +102,8 @@
 - After a successful hold:
   1. Create a verification case and expiring hashed customer token.
   2. For normal holds, create the case as `awaiting_customer` and send the per-site verification email when enabled.
+     - The initial email and upload page list the same four required categories: proof of billing and shipping address; payment card showing only the last four digits and cardholder’s name; government-issued photo ID; and a selfie of the cardholder holding the ID.
+     - These requirements are guidance only. The initial form retains one flexible multi-file `document` field with the existing file-type and size rules.
   3. For military-address holds, create the case as `pending_review` and record the initial email as skipped by policy.
   4. Staff may manually request information from `pending_review`; successful delivery transitions to `awaiting_customer`, while failure leaves the case pending for retry.
   5. Send Slack only after Magento hold succeeds.
@@ -158,7 +161,7 @@ Run before deploy:
 npm run verify
 ```
 
-Expected: 88 tests, TypeScript success, and Wrangler dry-run success.
+Expected: 90 tests, TypeScript success, and Wrangler dry-run success.
 
 Deploy:
 

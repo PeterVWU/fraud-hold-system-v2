@@ -29,7 +29,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 88.
+- Current expected unit test count is 90.
 
 ## Local D1 Setup
 
@@ -177,6 +177,9 @@ rm /tmp/fraud-hold-staging.vars
 - Matched and non-matched rule evidence is stored in D1.
 - Suspicious orders are updated to Magento only when `MAGENTO_ORDER_UPDATES_ENABLED=true` and `HOLD_ACTION_MODE=live`.
 - Customer email is sent only when `CUSTOMER_EMAIL_ENABLED=true`.
+- Initial verification email text, HTML, and customer page show the same four document requirements before the secure upload action, use plural wording, and retain the generic multi-file `document` field.
+- Follow-up information-request pages show only the staff-selected categories and do not inherit the initial four-item guidance.
+- ECOM-263 manual verification completed on 2026-08-12 with staging-derived local case `000000290`: the simulated HTML email preview and the customer upload page rendered all four categories, plural wording, and the unchanged generic multi-file `document` control. The Worker ran with Magento updates, customer email delivery, and Slack disabled.
 - Cron, Workflow, manual, and latest-order scans run only when `FRAUD_SCAN_ENABLED=true`.
 - Test mode still creates verification cases without Magento writes or customer contact.
 - Approve, decline/cancel, and order-comment actions are blocked when Magento updates are disabled. Authorize.net refunds are performed manually by staff.

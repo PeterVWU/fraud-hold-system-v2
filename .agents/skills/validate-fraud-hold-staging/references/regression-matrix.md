@@ -18,9 +18,9 @@ Use this as the minimum inventory, then add every feature and limitation current
 | Payment/name history | Same/different card and billing name in UTC day; timestamp normalization |
 | Review persistence | Decision counts, required count, all rule evidence, signals, run logs, cursors |
 | Hold flow | Holdable, already held, non-holdable, false/error response, Magento comment |
-| Normal verification | `awaiting_customer`, token expiry/hash, email sent/failed/skipped, Slack ordering |
+| Normal verification | `awaiting_customer`, token expiry/hash, email sent/failed/skipped, Slack ordering; initial email/page share all four required document categories and plural wording while retaining the generic multi-file `document` field |
 | Military verification | `pending_review`, policy skip, mixed matches, token access, filters and rendering |
-| Information requests | Validation, standard/custom requests, token rotation, success transition, failure retry, history |
+| Information requests | Validation, standard/custom requests, token rotation, success transition, failure retry, history; follow-up page remains limited to staff-selected requirements |
 | Uploads/R2 | Type/size validation, request labels, private storage, retrieval, submitted status |
 | Staff auth/UI | Login/logout/session, filters, escaping, timezone/UTC, Magento links, completed controls |
 | Approve | Unhold, processing status, action audit, failure state |

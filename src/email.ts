@@ -1,6 +1,10 @@
 import type { Env, MagentoOrder, SiteConfig } from "./types";
 import { isCustomerEmailEnabled } from "./config";
-import { getInformationRequestLabel, type InformationRequestType } from "./informationRequests";
+import {
+  getInformationRequestLabel,
+  INITIAL_VERIFICATION_REQUIREMENTS,
+  type InformationRequestType
+} from "./informationRequests";
 import {
   completeInformationRequest,
   createInformationRequest,
@@ -196,15 +200,19 @@ export async function sendInformationRequestEmail(
 
 export function renderVerificationEmailText(site: SiteConfig, order: MagentoOrder, magicLink: string): string {
   const orderNumber = order.increment_id ?? String(order.entity_id);
+  const requirements = INITIAL_VERIFICATION_REQUIREMENTS.map((requirement) => `- ${requirement}`);
   return [
     `We need to verify order ${orderNumber}.`,
     "",
     `For customer protection, ${site.name} temporarily placed this order on hold while our team reviews verification documents.`,
     "",
-    "Please upload one document using this secure link:",
+    "Please provide the following verification documents:",
+    ...requirements,
+    "",
+    "Upload your documents using this secure link:",
     magicLink,
     "",
-    "After you submit the document, our staff will review it and either release the order for processing or cancel/refund it if verification is declined.",
+    "After you submit the documents, our staff will review them and either release the order for processing or cancel/refund it if verification is declined.",
     "",
     "If you did not place this order, please contact us by replying to this email."
   ].join("\n");
@@ -213,13 +221,17 @@ export function renderVerificationEmailText(site: SiteConfig, order: MagentoOrde
 export function renderVerificationEmailHtml(site: SiteConfig, order: MagentoOrder, magicLink: string): string {
   const escapedLink = escapeHtml(magicLink);
   const orderNumber = escapeHtml(order.increment_id ?? String(order.entity_id));
+  const requirements = INITIAL_VERIFICATION_REQUIREMENTS
+    .map((requirement) => `<li>${escapeHtml(requirement)}</li>`)
+    .join("");
   return `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172033;line-height:1.5">
 <h1 style="font-size:20px">Verification needed for order ${orderNumber}</h1>
 <p>For customer protection, ${escapeHtml(site.name)} temporarily placed this order on hold while our team reviews verification documents.</p>
-<p>Please upload one document using this secure link:</p>
-<p><a href="${escapedLink}" style="display:inline-block;background:#0f766e;color:white;padding:10px 14px;text-decoration:none;border-radius:6px">Upload document</a></p>
+<p>Please provide the following verification documents:</p>
+<ul>${requirements}</ul>
+<p><a href="${escapedLink}" style="display:inline-block;background:#0f766e;color:white;padding:10px 14px;text-decoration:none;border-radius:6px">Upload documents</a></p>
 <p>If the button does not work, open this link: <br><a href="${escapedLink}">${escapedLink}</a></p>
-<p>After you submit the document, our staff will review it and either release the order for processing or cancel/refund it if verification is declined.</p>
+<p>After you submit the documents, our staff will review them and either release the order for processing or cancel/refund it if verification is declined.</p>
 <p>If you did not place this order, please contact us by replying to this email.</p>
 </body></html>`;
 }

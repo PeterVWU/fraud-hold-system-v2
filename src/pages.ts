@@ -1,4 +1,8 @@
-import { getInformationRequestLabel, INFORMATION_REQUEST_OPTIONS } from "./informationRequests";
+import {
+  getInformationRequestLabel,
+  INFORMATION_REQUEST_OPTIONS,
+  INITIAL_VERIFICATION_REQUIREMENTS
+} from "./informationRequests";
 import type {
   VerificationCase,
   VerificationDocument,
@@ -24,13 +28,14 @@ export function renderCustomerUploadPage(
     ? informationRequest.requestedDocumentTypes.length
       ? informationRequest.requestedDocumentTypes.map((type) => `<label>${escapeHtml(getInformationRequestLabel(type))}<input required type="file" multiple name="document:${type}" accept="image/jpeg,image/png,image/webp,application/pdf"></label>`).join("")
       : '<label>Requested document <input required type="file" multiple name="document:additional" accept="image/jpeg,image/png,image/webp,application/pdf"></label>'
-    : '<label>Document <input required type="file" multiple name="document" accept="image/jpeg,image/png,image/webp,application/pdf"></label>';
+    : '<label>Documents <input required type="file" multiple name="document" accept="image/jpeg,image/png,image/webp,application/pdf"></label>';
   return html(`<main class="shell narrow">
 <h1>Upload verification documents</h1>
 ${message ? `<p class="notice">${escapeHtml(message)}</p>` : ""}
 <p>Order ${escapeHtml(orderLabel)} is temporarily on hold while our staff verifies the documents you submit.</p>
 ${informationRequest?.customMessage ? `<section><h2>Message from our team</h2><p class="preserve-lines">${escapeHtml(informationRequest.customMessage)}</p></section>` : ""}
 ${informationRequest?.requestedDocumentTypes.length ? `<section><h2>Requested documents</h2><ul>${informationRequest.requestedDocumentTypes.map((type) => `<li>${escapeHtml(getInformationRequestLabel(type))}</li>`).join("")}</ul></section>` : ""}
+${informationRequest ? "" : `<section><h2>Required verification documents</h2><ul>${INITIAL_VERIFICATION_REQUIREMENTS.map((requirement) => `<li>${escapeHtml(requirement)}</li>`).join("")}</ul></section>`}
 <form method="post" action="${uploadAction}" enctype="multipart/form-data">
 ${requestedFields}
 ${informationRequest?.requestedDocumentTypes.length ? '<label>Additional documents (optional)<input type="file" multiple name="document:additional" accept="image/jpeg,image/png,image/webp,application/pdf"></label>' : ""}
