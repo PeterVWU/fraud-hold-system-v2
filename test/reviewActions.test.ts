@@ -32,6 +32,88 @@ describe("staff review actions", () => {
     ).rejects.toThrow("Magento order updates are disabled");
   });
 
+  it("marks a registered customer verified before recording approval", async () => {
+    const responses = [
+      orderResponse("holded", 42),
+      jsonResponse(true),
+      jsonResponse("processing"),
+      jsonResponse(true),
+      jsonResponse({ id: 42, email: "buyer@example.com", custom_attributes: [{ attribute_code: "loyalty", value: "gold" }] }),
+      jsonResponse({ id: 42, email: "buyer@example.com", custom_attributes: [{ attribute_code: "loyalty", value: "gold" }, { attribute_code: "Verified", value: "1" }] })
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+    vi.stubGlobal("fetch", fetchMock);
+    const database = recordingDb();
+
+    await approveVerificationCase(
+      { ...env(), DB: database.db, MAGENTO_ORDER_UPDATES_ENABLED: "true", MAGENTO_TOKEN: "token" },
+      site(),
+      verificationCase(),
+      "2026-06-18T12:00:00.000Z"
+    );
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url).replace("https://staging.example.com/rest/V1", ""))).toEqual([
+      "/orders/1",
+      "/orders/1/unhold",
+      "/orders/1/statuses",
+      "/orders/1/comments",
+      "/customers/42",
+      "/customers/42"
+    ]);
+    expect(fetchMock.mock.calls[5][1]).toEqual(expect.objectContaining({ method: "PUT" }));
+    expect(database.bindings).toContainEqual([
+      expect.any(String), "case-1", "approve", null, null, null, null,
+      "2026-06-18T12:00:00.000Z", "2026-06-18T12:00:00.000Z"
+    ]);
+    expect(database.bindings).toContainEqual(["approved", "2026-06-18T12:00:00.000Z", "case-1"]);
+  });
+
+  it("approves a guest order without updating a customer", async () => {
+    const responses = [
+      orderResponse("holded"),
+      jsonResponse(true),
+      jsonResponse("processing"),
+      jsonResponse(true)
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await approveVerificationCase(
+      { ...env(), DB: recordingDb().db, MAGENTO_ORDER_UPDATES_ENABLED: "true", MAGENTO_TOKEN: "token" },
+      site(),
+      verificationCase(),
+      "2026-06-18T12:00:00.000Z"
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/customers/"))).toBe(false);
+  });
+
+  it("restores the hold and leaves D1 unchanged when the verified marker update fails", async () => {
+    const responses = [
+      orderResponse("holded", 42),
+      jsonResponse(true),
+      jsonResponse("processing"),
+      jsonResponse(true),
+      jsonResponse({ id: 42, email: "buyer@example.com", custom_attributes: [] }),
+      new Response(JSON.stringify({ message: "customer save failed" }), { status: 500 }),
+      jsonResponse(true)
+    ];
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(responses.shift()));
+    vi.stubGlobal("fetch", fetchMock);
+    const database = recordingDb();
+
+    await expect(approveVerificationCase(
+      { ...env(), DB: database.db, MAGENTO_ORDER_UPDATES_ENABLED: "true", MAGENTO_TOKEN: "token" },
+      site(),
+      verificationCase(),
+      "2026-06-18T12:00:00.000Z"
+    )).rejects.toThrow("Failed to mark Magento customer verified");
+
+    expect(String(fetchMock.mock.calls.at(-1)?.[0])).toBe("https://staging.example.com/rest/V1/orders/1/hold");
+    expect(database.bindings).toEqual([]);
+  });
+
   it("creates a credit memo, cancels when necessary, and records the decline", async () => {
     const responses = [
       orderResponse("holded"),
@@ -101,9 +183,9 @@ function verificationCase() {
   };
 }
 
-function orderResponse(status: string): Response {
+function orderResponse(status: string, customerId?: number): Response {
   return jsonResponse({
-    entity_id: 1, status, base_shipping_invoiced: 17.99,
+    entity_id: 1, status, customer_id: customerId, base_shipping_invoiced: 17.99,
     items: [{ item_id: 3274, qty_invoiced: 1, qty_refunded: 0 }]
   });
 }

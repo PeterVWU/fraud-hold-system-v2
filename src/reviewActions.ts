@@ -32,6 +32,23 @@ export async function approveVerificationCase(
   if (statusAfter !== "processing") {
     throw new Error(`Expected Magento status processing after approval, got ${statusAfter}`);
   }
+  if (order.customer_id) {
+    try {
+      await client.markCustomerVerified(order.customer_id);
+    } catch (error) {
+      try {
+        const restored = await client.holdOrder(verificationCase.magentoOrderId);
+        if (!restored) {
+          throw new Error("Magento returned false while restoring the hold");
+        }
+      } catch (rollbackError) {
+        throw new Error(
+          `${errorMessage(error)}; additionally failed to restore Magento hold: ${errorMessage(rollbackError)}`
+        );
+      }
+      throw new Error(`Failed to mark Magento customer verified: ${errorMessage(error)}`);
+    }
+  }
   await recordAction(env.DB, { caseId: verificationCase.id, action: "approve", staffNote: null, at: now });
   await updateCaseStatus(env.DB, verificationCase.id, "approved", now);
 }

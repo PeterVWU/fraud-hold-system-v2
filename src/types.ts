@@ -109,6 +109,10 @@ export interface MagentoCustomer {
   lastname?: string;
   created_at?: string;
   updated_at?: string;
+  custom_attributes?: Array<{
+    attribute_code: string;
+    value: unknown;
+  }>;
   [key: string]: unknown;
 }
 

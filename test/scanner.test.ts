@@ -52,6 +52,7 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn().mockResolvedValue({
         totalCount: 0,
         oldestCompletedOrderCreatedAt: null
@@ -102,6 +103,7 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2024-01-01 00:00:00" }),
+      markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn().mockResolvedValue({
         totalCount: 1,
         oldestCompletedOrderCreatedAt: "2025-06-18 11:30:00"
@@ -129,7 +131,7 @@ describe("scanner hold notifications", () => {
 
   it("creates military holds pending review, skips initial email, and still sends Slack", async () => {
     const client = {
-      listOrders: vi.fn(), getOrder: vi.fn(), getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2024-01-01 00:00:00" }),
+      listOrders: vi.fn(), getOrder: vi.fn(), getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2024-01-01 00:00:00" }), markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn().mockResolvedValue({ totalCount: 20, oldestCompletedOrderCreatedAt: "2020-01-01 00:00:00" }),
       holdOrder: vi.fn().mockResolvedValue(true), unholdOrder: vi.fn(), getOrderStatus: vi.fn().mockResolvedValue("holded"),
       addOrderComment: vi.fn().mockResolvedValue(true), cancelOrder: vi.fn(), listInvoices: vi.fn(), refundInvoiceOffline: vi.fn()
@@ -147,11 +149,12 @@ describe("scanner hold notifications", () => {
     expect(sendSlackHoldAlert).toHaveBeenCalledOnce();
   });
 
-  it("continues normal fraud evaluation when completed-order history fails", async () => {
+  it("continues normal fraud evaluation when customer and completed-order history lookups fail", async () => {
     const client = {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
-      getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      getCustomer: vi.fn().mockRejectedValue(new Error("customer unavailable")),
+      markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn().mockRejectedValue(new Error("history unavailable")),
       holdOrder: vi.fn().mockResolvedValue(true),
       unholdOrder: vi.fn(),
@@ -177,6 +180,7 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn(),
+      markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn(),
       holdOrder: vi.fn().mockResolvedValue(true),
       unholdOrder: vi.fn(),
@@ -201,6 +205,7 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn().mockResolvedValue({
         totalCount: 0,
         oldestCompletedOrderCreatedAt: null
@@ -235,6 +240,7 @@ describe("scanner hold notifications", () => {
       listOrders: vi.fn(),
       getOrder: vi.fn(),
       getCustomer: vi.fn().mockResolvedValue({ id: 10, created_at: "2026-01-01 00:00:00" }),
+      markCustomerVerified: vi.fn(),
       getCompletedOrderHistory: vi.fn().mockResolvedValue({
         totalCount: 0,
         oldestCompletedOrderCreatedAt: null
@@ -286,6 +292,18 @@ describe("scanner interval window", () => {
     );
 
     expect(scanStart).toBe("2026-06-18 11:55:00");
+  });
+
+  it("defaults to a one-minute scan interval when no cursor or interval exists", async () => {
+    vi.mocked(getSiteCursor).mockResolvedValueOnce({ lastSuccessCreatedAt: null, lastSuccessOrderId: null });
+
+    const scanStart = await getScanStart(
+      {} as D1Database,
+      { ...site(), cursorOverlapMinutes: 0 },
+      new Date("2026-06-18T12:00:00Z")
+    );
+
+    expect(scanStart).toBe("2026-06-18 11:59:00");
   });
 
   it("uses the saved cursor after a successful run", async () => {

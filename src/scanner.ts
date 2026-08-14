@@ -30,7 +30,7 @@ import type {
 import { createVerificationCaseForHold, recordEmailAttempt } from "./verification";
 
 const PAGE_SIZE = 100;
-const DEFAULT_SCHEDULE_INTERVAL_MINUTES = 5;
+const DEFAULT_SCHEDULE_INTERVAL_MINUTES = 1;
 
 export async function scanAllSites(env: Env, scheduledAt: Date): Promise<RunStats> {
   const aggregate: RunStats = { pagesFetched: 0, ordersEvaluated: 0, holdsAttempted: 0, holdsSucceeded: 0 };

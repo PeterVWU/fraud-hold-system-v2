@@ -5,6 +5,7 @@ export interface MagentoClient {
   listOrders(params: ListOrdersParams): Promise<MagentoOrder[]>;
   getOrder(orderId: number): Promise<MagentoOrder>;
   getCustomer(customerId: number): Promise<MagentoCustomer>;
+  markCustomerVerified(customerId: number): Promise<MagentoCustomer>;
   getCompletedOrderHistory(customerId: number, createdBefore: string): Promise<CompletedOrderHistory>;
   listInvoices(orderId: number): Promise<MagentoInvoice[]>;
   holdOrder(orderId: number): Promise<boolean>;
@@ -86,6 +87,33 @@ export function createMagentoClient(
 
     getCustomer(customerId) {
       return request<MagentoCustomer>(`/customers/${customerId}`);
+    },
+
+    async markCustomerVerified(customerId) {
+      const customer = await request<MagentoCustomer>(`/customers/${customerId}`);
+      const attributes = customer.custom_attributes ?? [];
+      const existingVerified = attributes.find(
+        (attribute) => attribute.attribute_code === "Verified"
+      );
+      if (existingVerified?.value === "1" || existingVerified?.value === 1) {
+        return customer;
+      }
+
+      const updatedCustomer: MagentoCustomer = {
+        ...customer,
+        custom_attributes: [
+          // Magento can return null-valued attributes but rejects them when the same customer is PUT back.
+          // Omitting them preserves their existing null state while keeping all writable unrelated attributes.
+          ...attributes.filter(
+            (attribute) => attribute.attribute_code !== "Verified" && attribute.value !== null
+          ),
+          { attribute_code: "Verified", value: "1" }
+        ]
+      };
+      return request<MagentoCustomer>(`/customers/${customerId}`, {
+        method: "PUT",
+        body: JSON.stringify({ customer: updatedCustomer })
+      });
     },
 
     async getCompletedOrderHistory(customerId, createdBefore) {

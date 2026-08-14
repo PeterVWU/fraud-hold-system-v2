@@ -1,14 +1,15 @@
 # Fraud Hold System v2
 
-Cloudflare Workers implementation for polling Magento orders every 5 minutes, evaluating configurable fraud rules, placing matching orders on hold, recording rule evidence in D1, and sending Slack alerts.
+Cloudflare Workers implementation for polling Magento orders every minute, evaluating configurable fraud rules, placing matching orders on hold, recording rule evidence in D1, and sending Slack alerts.
 
 ## Architecture
 
-- Cloudflare Workflows runs the scheduled scan with `*/5 * * * *`.
+- Cloudflare Workflows runs the scheduled scan with `* * * * *`.
 - D1 stores site cursors, order reviews, rule evidence, reusable recent-order signals, and run logs.
 - Magento REST is used for order search, order detail, hold, status, and internal comments.
 - Rules live in `src/rules.ts`; each rule has an `id`, `name`, `enabled`, `required`, and `evaluate` function.
 - The hold threshold is 2 matched non-required rules. The overseas military shipping-address rule is required and holds by itself.
+- Registered Magento customers with the exact custom attribute `Verified = "1"` bypass every fraud rule, including required rules. Customer lookup failures fail closed and continue normal evaluation.
 - Registered customers with sufficiently old completed-order history bypass remaining non-required fraud rules; `CUSTOMER_HISTORY_EXEMPTION_MONTHS` controls the calendar-month threshold and defaults to 12. A military-address match overrides this exemption.
 - Magento writes require both `MAGENTO_ORDER_UPDATES_ENABLED=true` and `HOLD_ACTION_MODE=live`.
 - Customer verification email requires `CUSTOMER_EMAIL_ENABLED=true`.
@@ -24,8 +25,8 @@ Cloudflare Workers implementation for polling Magento orders every 5 minutes, ev
 - Worker name: `fraud-hold-system-v2`
 - Workflow: `fraud-scan-workflow`
 - D1 database: `fraud_hold_system`
-- Schedule: every 5 minutes
-- Last documented deployed version: `916e6846-82eb-497d-9c1c-8ca4043530cc` (source commit `eaaa538`)
+- Deployed schedule: every minute
+- Last documented deployed version: `9fb4d47f-fb32-42d4-8e2a-da34b143bc88` (ECOM-267)
 - Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12`.
 - VWU and Misthub are enabled. Staging VWU is disabled in production because deployed scans still fail at origin nginx Basic Auth; it remains available for isolated local validation.
 
@@ -46,7 +47,7 @@ npx wrangler secret put STAFF_REVIEW_PASSWORD
 npx wrangler secret put STAFF_SESSION_SECRET
 ```
 
-4. Update `MAGENTO_SITES_JSON` in `wrangler.jsonc` for each Magento site. Add one object per site with a unique `id`, `baseUrl`, `storeCode`, `accessTokenEnv`, IANA `timeZone`, optional `adminBaseUrl`, optional `paymentFingerprintPaths`, and optional `scanIntervalMinutes`. Staff timestamps use the site timezone and retain UTC in the HTML tooltip. Scheduled scans default to the last 5-minute interval when no cursor exists.
+4. Update `MAGENTO_SITES_JSON` in `wrangler.jsonc` for each Magento site. Add one object per site with a unique `id`, `baseUrl`, `storeCode`, `accessTokenEnv`, IANA `timeZone`, optional `adminBaseUrl`, optional `paymentFingerprintPaths`, and optional `scanIntervalMinutes`. Staff timestamps use the site timezone and retain UTC in the HTML tooltip. `scanIntervalMinutes` controls only the initial no-cursor scan window and defaults to 1 when omitted; the global Cloudflare cron controls actual execution frequency. Changing the cadence requires editing `wrangler.jsonc` and redeploying.
 5. Set `SLACK_CHANNEL_ID=C0BBH9RE3GV` for the `fraud-hold-system` Slack channel. `SLACK_BOT_TOKEN` is preferred for channel posting; `SLACK_WEBHOOK_URL` remains supported as a fallback.
 6. Set `CUSTOMER_HISTORY_EXEMPTION_MONTHS` to a positive whole number of calendar months. Missing, zero, fractional, and invalid values safely fall back to 12.
 
@@ -59,7 +60,7 @@ When an order reaches the fraud threshold, live mode first places an eligible or
 - Military-address cases start as `pending_review`; their initial customer email is recorded as skipped by policy. Staff can manually request information, transitioning the case to `awaiting_customer` only after successful delivery.
 - Documents are validated for type and size, then stored privately in the `VERIFY_DOCS_BUCKET` R2 binding.
 - Staff sign in at `/staff/login` and review cases at `/staff`.
-- Approve releases a Magento hold and expects Magento status `processing`.
+- Approve releases a Magento hold, expects Magento status `processing`, then marks a registered customer `Verified = "1"` before recording approval in D1. Writable unrelated custom attributes are preserved; null-valued attributes are omitted from the PUT because Magento returns but will not reaccept them. Guest approvals skip the customer write; failures restore the hold when possible and leave the case retryable.
 - Decline shows a confirmation popup reminding staff that the Authorize.net refund remains manual, releases the Magento hold, creates a full offline invoice credit memo, and accepts Magento `closed` or `canceled`. It calls cancel only when the credit memo did not already close the order.
 - Amasty Store Credit requires `arguments.extension_attributes.amstorecredit_base_amount: 0` in refund API requests even when no store credit is used. Staging order `000000235` verified this payload by creating credit memo `22`, refunding `$37.49` in Magento, and transitioning to `closed` without contacting Authorize.net.
 - Failed credit-memo attempts try to restore the Magento hold.
@@ -153,6 +154,7 @@ Magento admin: Open order
 
 The active rules are:
 
+- Verified Magento customer exemption. This first-position rule allows a registered customer's order immediately only when the exact `Verified` custom attribute has string value `"1"`. It overrides every current rule, including military-address detection. Guests, lookup failures, missing attributes, and other values continue normally.
 - Required overseas military shipping address. Matches normalized shipping pairs `AA`/`34000`–`34099`, `AE`/`09000`–`09899`, and `AP`/`96200`–`96699`, including ZIP+4. It holds by itself, overrides the history exemption, creates a `pending_review` case, and suppresses the initial customer email.
 - Registered customers with a completed order at least `CUSTOMER_HISTORY_EXEMPTION_MONTHS` calendar months older than the current order are exempted from remaining non-required fraud rules unless the military rule matched. The setting defaults to 12 when omitted or invalid. The exemption uses Magento customer ID only; guest-email history does not qualify.
 - Billing/shipping address mismatch. This signal is suppressed for established customers with at least 10 completed Magento orders before the current order.
@@ -208,6 +210,8 @@ npx wrangler d1 execute fraud_hold_system --remote --command "SELECT site_id, st
 ## Regression Testing
 
 Use the project-local `$validate-fraud-hold-staging` skill in `.agents/skills/validate-fraud-hold-staging` after completing an implementation. It runs the automated baseline, starts a staging-isolated local Worker, creates purpose-built Staging VWU data, and audits every existing and newly documented feature. Its launcher defaults to no Magento writes or customer email and requires explicit gates for approved live phases.
+
+ECOM-266 was manually validated on 2026-08-14 with Staging VWU customer `peter@vapewholesaleusa.com` (customer ID `4`). Approval of order `000000292` changed `Verified` from `"0"` to `"1"`; the subsequent `$240` military-address order `000000293` (`AE` / `09012`) was allowed immediately with no hold, verification case, or email. Slack was disabled and production was not deployed or mutated.
 
 See `TESTING.md` for the required automated checks and staging Magento regression tests, including the positive hold case and the negative no-status-change case.
 

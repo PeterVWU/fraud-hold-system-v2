@@ -29,7 +29,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 90.
+- Current expected unit test count is 102.
 
 ## Local D1 Setup
 
@@ -85,6 +85,17 @@ Expected evidence from the verified staging run:
 
 If the order is already `holded`, the Worker should not call Magento hold again; D1 should record hold satisfied with `hold_succeeded=1` and `hold_attempted=0`.
 
+## Verified Customer Bypass Test
+
+Verified manually on 2026-08-14 with Staging VWU customer ID `4` / `peter@vapewholesaleusa.com`:
+
+- Safe detection order `000000291` observed `Verified = "0"`, matched three non-required rules, recorded a dry-run hold, and sent no email.
+- Live order `000000292` was held and recorded one successful verification email to the approved recipient through Wrangler's local simulated email binding; no external inbox delivery occurred.
+- Approval returned the order to `processing`, committed the D1 case as `approved`, and changed the customer's exact `Verified` attribute to `"1"` while preserving writable unrelated attributes and existing null-valued attribute state.
+- Magento offline invoice `202` was created without capture or customer notification so the check/money-order fixture could enter `processing` before the approval retry.
+- Post-verification order `000000293` had military shipping pair `AE` / `09012` and total `$240`, but stayed `pending`; D1 recorded `allow`, only `verified_customer` was evaluated, and no hold, case, email, or Slack alert was created.
+- Local Worker isolation was `vwu=false`, `misthub=false`, `staging-vwu=true`. Slack was disabled. Production was not deployed or mutated.
+
 ## Staging Negative Status Test
 
 Purpose: prove an order below threshold is not modified.
@@ -111,7 +122,8 @@ Covered by automated tests in `test/scanner.test.ts`.
 Expected behavior:
 
 - If a site has no cursor, the scan starts at `scheduledAt - scanIntervalMinutes`.
-- Current configured interval is 5 minutes.
+- Current configured interval is 1 minute, and omission defaults to 1 minute.
+- `scanIntervalMinutes` controls only this initial no-cursor window; the global Cloudflare cron controls execution frequency.
 - Current configured cursor overlap is 0 minutes.
 - If a cursor exists, the scan starts from `site_cursors.last_success_created_at`.
 - A site with `enabled:false` is ignored.
@@ -166,11 +178,13 @@ rm /tmp/fraud-hold-staging.vars
 
 ## Requirement Checklist
 
-- Scheduled Cloudflare Workflow exists with `*/5 * * * *`.
+- A registered Magento customer with exact custom attribute `Verified = "1"` bypasses every fraud rule, including the required military-address rule; guests, lookup failures, missing attributes, and other values continue normal evaluation.
+- Approval marks registered customers verified only after unhold and `processing` status checks, preserves unrelated customer data and writable custom attributes while omitting Magento-returned null custom attributes, skips guests, and restores the hold without D1 approval writes when the marker update fails.
+- Scheduled Cloudflare Workflow exists in production with `* * * * *`.
 - Multiple Magento sites are configurable through `MAGENTO_SITES_JSON`.
 - Disabled sites are skipped through each site's `enabled` flag.
 - New orders are fetched from Magento and paged through by `created_at`.
-- No-cursor scheduled scans only check the configured interval, currently 5 minutes.
+- No-cursor scheduled scans only check the configured interval, currently 1 minute; an omitted interval defaults to 1 minute.
 - Rules are modular and can be enabled, disabled, added, or removed in `src/rules.ts`.
 - Threshold matching holds only when matched non-required rules reach the configured threshold.
 - Required-rule support exists through each rule's `required` flag.

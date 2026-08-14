@@ -15,6 +15,27 @@ import { stateForUsZip } from "./zipState";
 
 export const INITIAL_RULES: FraudRule[] = [
   {
+    id: "verified_customer",
+    name: "Verified Magento customer",
+    enabled: true,
+    required: false,
+    effect: "exemption",
+    async evaluate(order, context) {
+      const verifiedAttribute = context.customer?.custom_attributes?.find(
+        (attribute) => attribute.attribute_code === "Verified"
+      );
+      const matched = Boolean(order.customer_id) && verifiedAttribute?.value === "1";
+      return {
+        matched,
+        evidence: {
+          customerId: order.customer_id ?? null,
+          verifiedAttributePresent: verifiedAttribute !== undefined,
+          verifiedValue: verifiedAttribute?.value ?? null
+        }
+      };
+    }
+  },
+  {
     id: "military_shipping_address",
     name: "Overseas military shipping address",
     enabled: true,

@@ -8,11 +8,14 @@
 - D1: `fraud_hold_system`.
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
-- Cron: `*/5 * * * *`.
-- Last known deployed version: `916e6846-82eb-497d-9c1c-8ca4043530cc` (source commit `eaaa538`).
-- Expected test count: 90.
+- Cron: `* * * * *`.
+- Last known deployed version: `9fb4d47f-fb32-42d4-8e2a-da34b143bc88` (ECOM-267).
+- Expected test count: 102.
 - ECOM-262 military-address handling and the behavioral-rule timestamp fix are deployed in production.
 - ECOM-263 initial verification requirements were manually verified in an isolated local Worker against staging-derived case `000000290` and deployed in production as Worker version `b8bc01f5-43b5-4925-9486-3c57cb113a76`: the simulated HTML email and customer upload page showed the same four categories, and the upload page retained the generic multi-file `document` field. No real email or Magento mutation was used during validation.
+- ECOM-266 was staging-verified on 2026-08-14 with customer `peter@vapewholesaleusa.com` / Magento customer ID `4`. Order `000000292` was held, recorded one successful verification email through Wrangler's local simulated email binding, approved, returned to `processing`, and changed the exact `Verified` attribute from `"0"` to `"1"`. Magento rejects null-valued custom attributes when they are replayed in a customer PUT, so the update omits those while preserving their existing null state and all writable unrelated attributes. Post-verification military order `000000293` (`AE` / `09012`, `$240`) remained `pending`; D1 recorded `allow`, evaluated only `verified_customer`, and created no hold, case, or email. Offline invoice `202` was created without capture or notification on order `000000292` so the check/money-order fixture could satisfy the approval contract's `processing` transition. The test was local/staging-only with Slack disabled, no external email delivery, and no production deployment.
+- ECOM-266 is deployed in production as Worker version `e3d64180-80ac-47de-9c1c-8ca4043530cc`. The first scheduled run after deployment completed successfully for VWU and Misthub with no errors or hold attempts.
+- ECOM-267 is deployed in production as Worker version `9fb4d47f-fb32-42d4-8e2a-da34b143bc88`. Consecutive scheduled runs began at `2026-08-14T19:17:52Z`, `19:18:52Z`, and `19:19:52Z`, confirming the one-minute cadence. Completed VWU and Misthub runs succeeded with no errors or hold attempts.
 - Preserve unrelated changes and `.dev.vars.swp`; do not assume the working tree is clean.
 
 ## Production State
@@ -71,6 +74,9 @@
 - Hold threshold: 2 matched non-required rules unless overridden per site.
 - The overseas military shipping-address rule is required; all other active fraud rules are non-required.
 - Active rules:
+  - Verified Magento customer exemption.
+    - A registered customer whose exact `Verified` custom attribute has string value `"1"` bypasses every fraud rule, including the required military-address rule.
+    - Guests, missing customers, lookup failures, missing attributes, and other values continue through normal evaluation.
   - Overseas military shipping address.
     - Matches shipping state/ZIP pairs `AA`/`34000`–`34099`, `AE`/`09000`–`09899`, and `AP`/`96200`–`96699`.
     - Accepts normalized five-digit and ZIP+4 values and stores normalized evidence.
@@ -111,7 +117,7 @@
 - Staff queue: `/staff`; login: `/staff/login`.
 - Queue and case pages include Magento admin links opening in a new tab.
 - Staff queue timestamps are formatted in each site's configured `MAGENTO_SITES_JSON.timeZone`, with UTC retained in the HTML timestamp and tooltip.
-- Approve releases the Magento hold and expects status `processing`; completed cases hide further action buttons and show a success message.
+- Approve releases the Magento hold, expects status `processing`, and then sets the registered Magento customer's exact `Verified` attribute to `"1"` before committing the D1 approval. Existing customer data and writable unrelated custom attributes are preserved; null-valued custom attributes returned by Magento are omitted from the PUT because Magento rejects them on input while retaining their existing null state. Guest approvals skip the marker. A marker failure attempts to restore the hold and leaves the case unapproved for retry. Completed cases hide further action buttons and show a success message.
 - Decline is implemented, staging-verified, and deployed in production:
   - The case page shows a confirmation popup reminding staff that the Authorize.net refund remains manual.
   - The flow unholds the order, creates a full offline invoice credit memo, and accepts Magento `closed` or `canceled`; it calls cancel only if the credit memo did not already close the order.
@@ -162,7 +168,7 @@ Run before deploy:
 npm run verify
 ```
 
-Expected: 90 tests, TypeScript success, and Wrangler dry-run success.
+Expected: 102 tests, TypeScript success, and Wrangler dry-run success reporting cron `* * * * *`.
 
 Deploy:
 

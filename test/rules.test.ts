@@ -65,6 +65,42 @@ const signal: OrderSignal = {
 };
 
 describe("fraud rule engine", () => {
+  it.each([
+    ["normal", baseOrder],
+    ["military", withShipping(baseOrder, "AE", "09012")]
+  ])("lets a verified customer bypass an otherwise qualifying %s hold", async (_kind, order) => {
+    const db = fakeDb({ recentCount: 1, differentPaymentOrBilling: true });
+    const decision = await evaluateFraudRules(env(), site, { ...order, grand_total: 200 }, {
+      db,
+      now: new Date(),
+      signal: { ...signal, grandTotal: 200 },
+      customer: { id: 10, custom_attributes: [{ attribute_code: "Verified", value: "1" }] }
+    });
+
+    expect(decision).toMatchObject({ decision: "allow", matchedCount: 0, requiredMatchedCount: 0 });
+    expect(decision.ruleResults).toEqual([
+      expect.objectContaining({ ruleId: "verified_customer", matched: true })
+    ]);
+  });
+
+  it.each([
+    ["guest", { customer: null, order: { ...baseOrder, customer_id: undefined } }],
+    ["missing attribute", { customer: { id: 10 }, order: baseOrder }],
+    ["other value", { customer: { id: 10, custom_attributes: [{ attribute_code: "Verified", value: "0" }] }, order: baseOrder }],
+    ["wrong case", { customer: { id: 10, custom_attributes: [{ attribute_code: "verified", value: "1" }] }, order: baseOrder }]
+  ])("continues normal fraud rules for %s", async (_kind, input) => {
+    const db = fakeDb({ recentCount: 1, differentPaymentOrBilling: true });
+    const decision = await evaluateFraudRules(env(), site, { ...input.order, grand_total: 200 }, {
+      db,
+      now: new Date(),
+      signal: { ...signal, grandTotal: 200 },
+      customer: input.customer
+    });
+
+    expect(decision.ruleResults[0]).toMatchObject({ ruleId: "verified_customer", matched: false });
+    expect(decision.decision).toBe("hold");
+  });
+
   it("allows an order when fewer than two non-required rules match", async () => {
     const db = fakeDb({ recentCount: 0, differentPaymentOrBilling: false });
     const decision = await evaluateFraudRules(env(), site, baseOrder, { db, now: new Date(), signal, customer: null });
@@ -127,8 +163,8 @@ describe("fraud rule engine", () => {
       matchedCount: 0,
       requiredMatchedCount: 0
     });
-    expect(decision.ruleResults).toHaveLength(2);
-    expect(decision.ruleResults[1]).toMatchObject({
+    expect(decision.ruleResults).toHaveLength(3);
+    expect(decision.ruleResults[2]).toMatchObject({
       ruleId: "completed_order_older_than_exemption_threshold",
       matched: true
     });
@@ -177,7 +213,7 @@ describe("fraud rule engine", () => {
     );
 
     expect(decision.decision).toBe("allow");
-    expect(decision.ruleResults[1]).toMatchObject({
+    expect(decision.ruleResults[2]).toMatchObject({
       ruleId: "completed_order_older_than_exemption_threshold",
       matched: true,
       evidence: {
@@ -204,7 +240,7 @@ describe("fraud rule engine", () => {
     });
 
     expect(decision.decision).toBe("allow");
-    expect(decision.ruleResults[1]).toMatchObject({
+    expect(decision.ruleResults[2]).toMatchObject({
       ruleId: "completed_order_older_than_exemption_threshold",
       matched: true,
       evidence: {
