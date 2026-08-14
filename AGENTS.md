@@ -9,7 +9,7 @@
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `* * * * *`.
-- Last known deployed version: `9fb4d47f-fb32-42d4-8e2a-da34b143bc88` (ECOM-267).
+- Last known deployed version: `cb26a659-8cda-495a-9fe6-bf10e65f7056` (Ejuices perimeter-header configuration).
 - Expected test count: 102.
 - ECOM-262 military-address handling and the behavioral-rule timestamp fix are deployed in production.
 - ECOM-263 initial verification requirements were manually verified in an isolated local Worker against staging-derived case `000000290` and deployed in production as Worker version `b8bc01f5-43b5-4925-9486-3c57cb113a76`: the simulated HTML email and customer upload page showed the same four categories, and the upload page retained the generic multi-file `document` field. No real email or Magento mutation was used during validation.
@@ -67,6 +67,21 @@
 - REST base: `/rest/V1` (`storeCode: ""`).
 - Timezone: `America/Los_Angeles`.
 - Access-token secret: `MAGENTO_MISTHUB_ACCESS_TOKEN`.
+
+### `ejuicescom`
+
+- Name: `ejuice.com`.
+- Enabled: true.
+- Base URL: `https://ejuices.com/`.
+- REST base: `/rest/V1` (`storeCode: ""`).
+- Timezone: `America/Los_Angeles`.
+- Access-token secret: `MAGENTO_EJUICESCOM_ACCESS_TOKEN`.
+- Extra perimeter header:
+  - name: `x-ejuices-agent-auth`
+  - value secret: `MAGENTO_EJUICES_AGENT_AUTH`
+- Verification sender: `no-reply@ejuices.com`; reply-to: `support@ejuices.com`.
+- The authenticated Cloudflare skip rule is working: the first two scheduled scans after version `cb26a659-8cda-495a-9fe6-bf10e65f7056` each fetched one Magento page successfully with no errors, orders in the window, holds, or notifications.
+- Keep the skip rule covering both GET scans and the POST endpoints used by hold, unhold, comments, approve, and decline.
 
 ## Fraud Rules
 
@@ -141,6 +156,8 @@ Never commit secret values. Expected production secret names:
 
 - `MAGENTO_MAIN_ACCESS_TOKEN`
 - `MAGENTO_MISTHUB_ACCESS_TOKEN`
+- `MAGENTO_EJUICESCOM_ACCESS_TOKEN`
+- `MAGENTO_EJUICES_AGENT_AUTH`
 - `MAGENTO_STAGING_ACCESS_TOKEN`
 - `MAGENTO_VWU_AGENT_AUTH`
 - `MANUAL_RUN_TOKEN`

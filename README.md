@@ -26,9 +26,9 @@ Cloudflare Workers implementation for polling Magento orders every minute, evalu
 - Workflow: `fraud-scan-workflow`
 - D1 database: `fraud_hold_system`
 - Deployed schedule: every minute
-- Last documented deployed version: `9fb4d47f-fb32-42d4-8e2a-da34b143bc88` (ECOM-267)
+- Last documented deployed version: `cb26a659-8cda-495a-9fe6-bf10e65f7056` (Ejuices perimeter-header configuration)
 - Current production configuration: fraud scanning, Magento updates, and customer email are enabled; `HOLD_ACTION_MODE=live` and `CUSTOMER_HISTORY_EXEMPTION_MONTHS=12`.
-- VWU and Misthub are enabled. Staging VWU is disabled in production because deployed scans still fail at origin nginx Basic Auth; it remains available for isolated local validation.
+- VWU, Misthub, and Ejuices are enabled in the current deployment. Ejuices uses an authenticated perimeter header and its first two post-deployment scans fetched Magento successfully. Staging VWU is disabled in production because deployed scans still fail at origin nginx Basic Auth; it remains available for isolated local validation.
 
 ## Configure
 
@@ -39,6 +39,8 @@ Cloudflare Workers implementation for polling Magento orders every minute, evalu
 ```bash
 npx wrangler secret put MAGENTO_MAIN_ACCESS_TOKEN
 npx wrangler secret put MAGENTO_MISTHUB_ACCESS_TOKEN
+npx wrangler secret put MAGENTO_EJUICESCOM_ACCESS_TOKEN
+npx wrangler secret put MAGENTO_EJUICES_AGENT_AUTH
 npx wrangler secret put MAGENTO_STAGING_ACCESS_TOKEN
 npx wrangler secret put MAGENTO_VWU_AGENT_AUTH
 npx wrangler secret put SLACK_BOT_TOKEN
@@ -138,6 +140,24 @@ Admin base URL:
 
 ```text
 https://sdhds5.misthub.com/Gi3ygQ6cafEK7hZf6uzf
+```
+
+### Ejuices
+
+- Site ID: `ejuicescom`
+- Enabled in production: yes
+- Magento base URL: `https://ejuices.com/`
+- Secret name: `MAGENTO_EJUICESCOM_ACCESS_TOKEN`
+- Perimeter header: `x-ejuices-agent-auth`, sourced from secret `MAGENTO_EJUICES_AGENT_AUTH`
+- REST base path: `/rest/V1` (`storeCode` is an empty string in config)
+- Verification sender: `no-reply@ejuices.com`
+- Verification reply-to: `support@ejuices.com`
+- Cloudflare must skip relevant security checks for authenticated `/rest/V1/` traffic carrying the configured perimeter header, covering both GET and POST API requests.
+
+Admin base URL:
+
+```text
+https://v0c3z.ejuices.com/3ipSgLEKJMWxF6toVmTr/
 ```
 
 Slack hold alert format:

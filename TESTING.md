@@ -182,6 +182,7 @@ rm /tmp/fraud-hold-staging.vars
 - Approval marks registered customers verified only after unhold and `processing` status checks, preserves unrelated customer data and writable custom attributes while omitting Magento-returned null custom attributes, skips guests, and restores the hold without D1 approval writes when the marker update fails.
 - Scheduled Cloudflare Workflow exists in production with `* * * * *`.
 - Multiple Magento sites are configurable through `MAGENTO_SITES_JSON`.
+- Production site `ejuicescom` is enabled with a one-minute initial window, access-token secret `MAGENTO_EJUICESCOM_ACCESS_TOKEN`, and perimeter-header secret `MAGENTO_EJUICES_AGENT_AUTH`. After deploying the authenticated header configuration, two consecutive scheduled scans each fetched one Magento page successfully with no errors, orders in the window, holds, or notifications.
 - Disabled sites are skipped through each site's `enabled` flag.
 - New orders are fetched from Magento and paged through by `created_at`.
 - No-cursor scheduled scans only check the configured interval, currently 1 minute; an omitted interval defaults to 1 minute.
