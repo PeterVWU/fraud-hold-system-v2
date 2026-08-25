@@ -23,7 +23,7 @@ Use this as the minimum inventory, then add every feature and limitation current
 | Military verification | `pending_review`, policy skip, mixed matches, token access, filters and rendering |
 | Information requests | Validation, standard/custom requests, token rotation, success transition, failure retry, history; follow-up page remains limited to staff-selected requirements |
 | Uploads/R2 | Type/size validation, request labels, private storage, retrieval, submitted status |
-| Staff auth/UI | Login/logout/session, filters, escaping, timezone/UTC, Magento links, completed controls |
+| Staff auth/UI | Login/logout/session, server-side status filters and case-insensitive literal order-number substring search, increment-ID/numeric-ID fallback, combined predicates and filtered totals, blank and wildcard-character inputs, search-specific empty state, 25-case pagination, first/middle/last and invalid/excessive page boundaries, status/search-preserving links and control reset, all matching cases reachable, HTML/URL escaping, timezone/UTC, Magento links, completed controls |
 | Approve | Unhold, processing status, registered-customer marker preserving other data/writable attributes while omitting Magento-returned null custom attributes, guest skip, marker-failure hold restoration with no D1 approval writes, action audit |
 | Decline | Confirmation, unhold, invoice lookup, offline full credit memo, Amasty field, close/cancel, hold restoration |
 | Slack | Bot posting, webhook fallback, errors, skip when unconfigured, only after successful hold |

@@ -7,7 +7,8 @@ import type {
   VerificationCase,
   VerificationDocument,
   VerificationInformationRequest,
-  StaffCaseStatusFilter
+  StaffCaseStatusFilter,
+  StaffCasePage
 } from "./verification";
 
 export function html(body: string, status = 200, headers: HeadersInit = {}): Response {
@@ -57,7 +58,13 @@ ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
 
 export function renderStaffList(
   cases: Array<VerificationCase & { adminOrderUrl: string | null; timeZone?: string }>,
-  statusFilter: StaffCaseStatusFilter = "open"
+  statusFilter: StaffCaseStatusFilter = "open",
+  page: Pick<StaffCasePage, "totalCount" | "currentPage" | "totalPages"> = {
+    totalCount: cases.length,
+    currentPage: 1,
+    totalPages: 1
+  },
+  orderSearch = ""
 ): Response {
   const rows = cases
     .map(
@@ -69,10 +76,53 @@ export function renderStaffList(
 <h1>Verification queue</h1>
 <form method="get" action="/staff" class="filters">
 <label>Status <select name="status">${renderStatusOptions(statusFilter)}</select></label>
-<button type="submit">Filter</button>
+<label>Order number <input type="search" name="order" value="${escapeHtml(orderSearch)}"></label>
+<button type="submit">Apply</button>
 </form>
-<table><thead><tr><th>Order</th><th>Magento</th><th>Site</th><th>Status</th><th>Flagged because</th><th>Email</th><th>Customer</th><th>Updated</th></tr></thead><tbody>${rows || "<tr><td colspan=\"8\">No cases need staff attention.</td></tr>"}</tbody></table>
+${renderPaginationSummary(page.totalCount, page.currentPage)}
+<table><thead><tr><th>Order</th><th>Magento</th><th>Site</th><th>Status</th><th>Flagged because</th><th>Email</th><th>Customer</th><th>Updated</th></tr></thead><tbody>${rows || `<tr><td colspan="8">${orderSearch ? "No cases match that order number." : "No cases need staff attention."}</td></tr>`}</tbody></table>
+${renderPagination(statusFilter, orderSearch, page.currentPage, page.totalPages)}
 </main>`);
+}
+
+function renderPaginationSummary(totalCount: number, currentPage: number): string {
+  const start = totalCount === 0 ? 0 : ((currentPage - 1) * 25) + 1;
+  const end = Math.min(currentPage * 25, totalCount);
+  return `<p class="pagination-summary">Showing ${start}–${end} of ${totalCount}</p>`;
+}
+
+function renderPagination(statusFilter: StaffCaseStatusFilter, orderSearch: string, currentPage: number, totalPages: number): string {
+  if (totalPages <= 1) {
+    return "";
+  }
+  const pageNumbers = new Set([1, totalPages]);
+  for (let page = Math.max(1, currentPage - 2); page <= Math.min(totalPages, currentPage + 2); page += 1) {
+    pageNumbers.add(page);
+  }
+  const numbers = [...pageNumbers].sort((a, b) => a - b);
+  const items: string[] = [];
+  let previousNumber = 0;
+  for (const page of numbers) {
+    if (previousNumber && page - previousNumber > 1) {
+      items.push('<span class="ellipsis" aria-hidden="true">…</span>');
+    }
+    items.push(page === currentPage
+      ? `<span class="current" aria-current="page">${page}</span>`
+      : `<a href="${staffPageUrl(statusFilter, orderSearch, page)}">${page}</a>`);
+    previousNumber = page;
+  }
+  const previous = currentPage === 1
+    ? '<span class="disabled" aria-disabled="true">Previous</span>'
+    : `<a href="${staffPageUrl(statusFilter, orderSearch, currentPage - 1)}">Previous</a>`;
+  const next = currentPage === totalPages
+    ? '<span class="disabled" aria-disabled="true">Next</span>'
+    : `<a href="${staffPageUrl(statusFilter, orderSearch, currentPage + 1)}">Next</a>`;
+  return `<nav class="pagination" aria-label="Queue pages">${previous}${items.join("")}${next}</nav>`;
+}
+
+function staffPageUrl(statusFilter: StaffCaseStatusFilter, orderSearch: string, page: number): string {
+  const orderParameter = orderSearch ? `&amp;order=${escapeHtml(encodeURIComponent(orderSearch))}` : "";
+  return `/staff?status=${encodeURIComponent(statusFilter)}${orderParameter}&amp;page=${page}`;
 }
 
 function renderStatusOptions(selected: StaffCaseStatusFilter): string {
@@ -251,5 +301,6 @@ dl{display:grid;grid-template-columns:140px 1fr;gap:8px;background:#fff;padding:
 .rules{margin:0;padding-left:18px;min-width:190px}.rules li+li{margin-top:4px}
 fieldset{display:grid;gap:8px;border:1px solid #d0d5dd;border-radius:6px;padding:12px}.check{display:flex;grid-template-columns:none;align-items:center;gap:8px;font-weight:400}.check input{padding:0}.documents li+li,.history>li+li{margin-top:10px}.preserve-lines{white-space:pre-wrap}
 .filters{display:flex;align-items:end}.filters label{min-width:220px}
+.pagination-summary{margin:16px 0 8px}.pagination{display:flex;align-items:center;gap:6px;margin:18px 0}.pagination a,.pagination span{padding:7px 10px;border-radius:6px}.pagination a{background:#fff;border:1px solid #b9c0ca;text-decoration:none}.pagination .current{background:#0f766e;color:#fff;font-weight:700}.pagination .disabled,.pagination .ellipsis{color:#667085}
 </style>`;
 }

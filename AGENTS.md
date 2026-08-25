@@ -9,8 +9,9 @@
 - R2: `fraud-hold-verification-docs`.
 - Workflow: `fraud-scan-workflow`.
 - Cron: `* * * * *`.
-- Last known deployed version: `cb26a659-8cda-495a-9fe6-bf10e65f7056` (Ejuices perimeter-header configuration).
-- Expected test count: 102.
+- Last known deployed version: `bad17ec3-7035-4435-a9b2-d5b4efc73670` (staff queue order-number search).
+- Staff queue order-number search was safe-mode validated with 30 local-only cases and deployed on 2026-08-25 as Worker version `bad17ec3-7035-4435-a9b2-d5b4efc73670`. Production partial searches found `MH00555816` in open cases and `000574302` in all cases; the first checked post-deployment scheduled VWU, Misthub, and Ejuices runs all succeeded with no errors or hold attempts.
+- Expected test count: 140.
 - ECOM-262 military-address handling and the behavioral-rule timestamp fix are deployed in production.
 - ECOM-263 initial verification requirements were manually verified in an isolated local Worker against staging-derived case `000000290` and deployed in production as Worker version `b8bc01f5-43b5-4925-9486-3c57cb113a76`: the simulated HTML email and customer upload page showed the same four categories, and the upload page retained the generic multi-file `document` field. No real email or Magento mutation was used during validation.
 - ECOM-266 was staging-verified on 2026-08-14 with customer `peter@vapewholesaleusa.com` / Magento customer ID `4`. Order `000000292` was held, recorded one successful verification email through Wrangler's local simulated email binding, approved, returned to `processing`, and changed the exact `Verified` attribute from `"0"` to `"1"`. Magento rejects null-valued custom attributes when they are replayed in a customer PUT, so the update omits those while preserving their existing null state and all writable unrelated attributes. Post-verification military order `000000293` (`AE` / `09012`, `$240`) remained `pending`; D1 recorded `allow`, evaluated only `verified_customer`, and created no hold, case, or email. Offline invoice `202` was created without capture or notification on order `000000292` so the check/money-order fixture could satisfy the approval contract's `processing` transition. The test was local/staging-only with Slack disabled, no external email delivery, and no production deployment.
@@ -130,6 +131,7 @@
   4. Staff may manually request information from `pending_review`; successful delivery transitions to `awaiting_customer`, while failure leaves the case pending for retry.
   5. Send Slack only after Magento hold succeeds.
 - Staff queue: `/staff`; login: `/staff/login`.
+- The staff queue is server-paginated at 25 cases per page. Status changes and order-number searches reset to page 1 and query D1 for a fresh filtered count and page; pagination links retain both controls and make every matching case reachable. Order search is a trimmed, case-insensitive literal substring match against the displayed increment ID or its numeric Magento-order-ID fallback.
 - Queue and case pages include Magento admin links opening in a new tab.
 - Staff queue timestamps are formatted in each site's configured `MAGENTO_SITES_JSON.timeZone`, with UTC retained in the HTML timestamp and tooltip.
 - Approve releases the Magento hold, expects status `processing`, and then sets the registered Magento customer's exact `Verified` attribute to `"1"` before committing the D1 approval. Existing customer data and writable unrelated custom attributes are preserved; null-valued custom attributes returned by Magento are omitted from the PUT because Magento rejects them on input while retaining their existing null state. Guest approvals skip the marker. A marker failure attempts to restore the hold and leaves the case unapproved for retry. Completed cases hide further action buttons and show a success message.
@@ -185,7 +187,7 @@ Run before deploy:
 npm run verify
 ```
 
-Expected: 102 tests, TypeScript success, and Wrangler dry-run success reporting cron `* * * * *`.
+Expected: 140 tests, TypeScript success, and Wrangler dry-run success reporting cron `* * * * *`.
 
 Deploy:
 

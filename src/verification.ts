@@ -19,6 +19,31 @@ export type VerificationCaseStatus =
 
 export type StaffCaseStatusFilter = VerificationCaseStatus | "open" | "all";
 
+export interface StaffCasePage {
+  cases: VerificationCase[];
+  totalCount: number;
+  currentPage: number;
+  totalPages: number;
+}
+
+export const STAFF_CASES_PAGE_SIZE = 25;
+
+export function parseStaffPage(value: string | null): number {
+  if (!value || !/^\d+$/.test(value)) {
+    return 1;
+  }
+  const page = Number(value);
+  return Number.isSafeInteger(page) && page > 0 ? page : 1;
+}
+
+export function parseStaffOrderSearch(value: string | null): string {
+  return value?.trim() ?? "";
+}
+
+function escapeLikeLiteral(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/%/g, "\\%").replace(/_/g, "\\_");
+}
+
 export interface VerificationCase {
   id: string;
   reviewId: string;
@@ -159,13 +184,37 @@ export async function getVerificationCaseDetail(db: D1Database, caseId: string):
 
 export async function listStaffCases(
   db: D1Database,
-  statusFilter: StaffCaseStatusFilter = "open"
-): Promise<VerificationCase[]> {
+  statusFilter: StaffCaseStatusFilter = "open",
+  requestedPage = 1,
+  orderSearch = ""
+): Promise<StaffCasePage> {
   const statusClause = statusFilter === "open"
     ? "AND status NOT IN ('approved', 'declined')"
     : statusFilter === "all"
       ? ""
       : "AND status = ?";
+  const normalizedOrderSearch = orderSearch.trim();
+  const orderClause = normalizedOrderSearch
+    ? "AND LOWER(COALESCE(increment_id, CAST(magento_order_id AS TEXT))) LIKE LOWER(?) ESCAPE '\\'"
+    : "";
+  const bindings: unknown[] = statusFilter === "open" || statusFilter === "all" ? [] : [statusFilter];
+  if (normalizedOrderSearch) {
+    bindings.push(`%${escapeLikeLiteral(normalizedOrderSearch)}%`);
+  }
+  const countRow = await db.prepare(
+    `SELECT COUNT(*) AS total
+       FROM verification_cases
+       WHERE 1 = 1
+       ${statusClause}
+       ${orderClause}`
+  )
+    .bind(...bindings)
+    .first<{ total: number }>();
+  const totalCount = Number(countRow?.total ?? 0);
+  const totalPages = Math.max(1, Math.ceil(totalCount / STAFF_CASES_PAGE_SIZE));
+  const safeRequestedPage = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+  const currentPage = Math.min(safeRequestedPage, totalPages);
+  const offset = (currentPage - 1) * STAFF_CASES_PAGE_SIZE;
   const statement = db.prepare(
     `SELECT id, review_id, site_id, magento_order_id, increment_id, customer_email, status,
         email_status, email_error, email_sent_at, document_uploaded_at, token_expires_at, created_at, updated_at,
@@ -173,14 +222,20 @@ export async function listStaffCases(
        FROM verification_cases vc
        WHERE 1 = 1
        ${statusClause}
-       ORDER BY updated_at DESC
-       LIMIT 100`
+       ${orderClause}
+       ORDER BY updated_at DESC, id DESC
+       LIMIT ? OFFSET ?`
   );
   const result = await statement
-    .bind(...(statusFilter === "open" || statusFilter === "all" ? [] : [statusFilter]))
+    .bind(...bindings, STAFF_CASES_PAGE_SIZE, offset)
     .all<VerificationCaseRow>();
 
-  return (result.results ?? []).map(mapCase);
+  return {
+    cases: (result.results ?? []).map(mapCase),
+    totalCount,
+    currentPage,
+    totalPages
+  };
 }
 
 export async function recordDocumentUploads(

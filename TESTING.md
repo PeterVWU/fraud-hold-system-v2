@@ -29,7 +29,7 @@ Expected result:
 - Unit tests pass.
 - TypeScript passes.
 - Wrangler bundles successfully and shows the Workflow, D1, and env var bindings.
-- Current expected unit test count is 102.
+- Current expected unit test count is 140.
 
 ## Local D1 Setup
 
@@ -57,6 +57,7 @@ Expected evidence from the verified staging run:
 - Hold attempted: `0`
 - Hold error/reason: `dry run: Magento hold skipped`
 - A verification case is created and appears in `/staff`.
+- Staff queue status filters and order-number searches fetch matching totals from D1, show 25 cases per page, reset to page 1 when applied, and retain both controls across pagination. Confirm first, middle, last, invalid, excessive, 25-record, and empty-result page boundaries. Confirm exact, prefix, suffix, mixed-case, numeric-ID fallback, blank/whitespace, literal `%`, `_`, and `\\`, combined status/search, and no-result searches.
 - No Magento write, customer email, or Slack hold alert is attempted.
 - Staff can open the generated customer upload page from the case detail screen.
 - Matched rule evidence:

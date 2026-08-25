@@ -21,6 +21,8 @@ import {
   getVerificationCaseDetail,
   getVerificationDocument,
   listStaffCases,
+  parseStaffOrderSearch,
+  parseStaffPage,
   recordAction,
   recordDocumentUploads,
   rotateVerificationToken,
@@ -244,9 +246,11 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
   if (url.pathname === "/staff") {
     const statusFilter = parseStaffCaseStatusFilter(url.searchParams.get("status"));
-    const cases = await listStaffCases(env.DB, statusFilter);
+    const page = parseStaffPage(url.searchParams.get("page"));
+    const orderSearch = parseStaffOrderSearch(url.searchParams.get("order"));
+    const result = await listStaffCases(env.DB, statusFilter, page, orderSearch);
     return renderStaffList(
-      cases.map((item) => {
+      result.cases.map((item) => {
         const site = getSiteForCase(env, item.siteId);
         return {
           ...item,
@@ -254,7 +258,9 @@ async function handleStaff(request: Request, env: Env): Promise<Response> {
           timeZone: site.timeZone
         };
       }),
-      statusFilter
+      statusFilter,
+      result,
+      orderSearch
     );
   }
 

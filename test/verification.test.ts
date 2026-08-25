@@ -1,37 +1,132 @@
 import { describe, expect, it, vi } from "vitest";
-import { completeInformationRequest, getVerificationCaseByToken, listStaffCases, recordDocumentUploads } from "../src/verification";
+import { completeInformationRequest, getVerificationCaseByToken, listStaffCases, parseStaffOrderSearch, recordDocumentUploads } from "../src/verification";
 
 describe("verification persistence", () => {
-  it("excludes completed cases from the default staff queue", async () => {
-    const all = vi.fn().mockResolvedValue({ results: [] });
-    const bind = vi.fn(() => ({ all }));
-    const prepare = vi.fn(() => ({ bind }));
-    const db = { prepare } as unknown as D1Database;
+  function queueDb(total: number) {
+    const countFirst = vi.fn().mockResolvedValue({ total });
+    const pageAll = vi.fn().mockResolvedValue({ results: [] });
+    const countBind = vi.fn(() => ({ first: countFirst }));
+    const pageBind = vi.fn(() => ({ all: pageAll }));
+    const prepare = vi.fn()
+      .mockReturnValueOnce({ bind: countBind })
+      .mockReturnValueOnce({ bind: pageBind });
+    return { db: { prepare } as unknown as D1Database, prepare, countBind, pageBind };
+  }
 
-    await listStaffCases(db);
+  it("uses the same open filter for count and page queries", async () => {
+    const { db, prepare, countBind, pageBind } = queueDb(26);
 
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("status NOT IN ('approved', 'declined')"));
-    expect(bind).toHaveBeenCalledWith();
+    const result = await listStaffCases(db);
+
+    const [countSql, pageSql] = prepare.mock.calls.map(([sql]) => String(sql));
+    expect(countSql).toContain("status NOT IN ('approved', 'declined')");
+    expect(pageSql).toContain("status NOT IN ('approved', 'declined')");
+    expect(countBind).toHaveBeenCalledWith();
+    expect(pageBind).toHaveBeenCalledWith(25, 0);
+    expect(result).toMatchObject({ totalCount: 26, currentPage: 1, totalPages: 2 });
   });
 
-  it("binds an explicit staff queue status filter", async () => {
-    const all = vi.fn().mockResolvedValue({ results: [] });
-    const bind = vi.fn(() => ({ all }));
-    const prepare = vi.fn(() => ({ bind }));
-    const db = { prepare } as unknown as D1Database;
+  it("uses the same explicit status filter and calculated offset", async () => {
+    const { db, prepare, countBind, pageBind } = queueDb(76);
 
-    await listStaffCases(db, "approved");
+    const result = await listStaffCases(db, "approved", 3);
 
-    expect(prepare).toHaveBeenCalledWith(expect.stringContaining("AND status = ?"));
-    expect(bind).toHaveBeenCalledWith("approved");
+    const [countSql, pageSql] = prepare.mock.calls.map(([sql]) => String(sql));
+    expect(countSql).toContain("AND status = ?");
+    expect(pageSql).toContain("AND status = ?");
+    expect(pageSql).toContain("ORDER BY updated_at DESC, id DESC");
+    expect(pageSql).toContain("LIMIT ? OFFSET ?");
+    expect(countBind).toHaveBeenCalledWith("approved");
+    expect(pageBind).toHaveBeenCalledWith("approved", 25, 50);
+    expect(result).toMatchObject({ totalCount: 76, currentPage: 3, totalPages: 4 });
+  });
+
+  it.each([
+    ["000574302", "%000574302%"],
+    ["MH0055", "%MH0055%"],
+    ["5816", "%5816%"],
+    ["mh00555816", "%mh00555816%"],
+    ["12345", "%12345%"],
+    ["%", "%\\%%"],
+    ["_", "%\\_%"],
+    ["\\", "%\\\\%"]
+  ])("uses a case-insensitive literal order search for %s", async (search, expectedBinding) => {
+    const { db, prepare, countBind, pageBind } = queueDb(1);
+
+    await listStaffCases(db, "approved", 1, search);
+
+    const [countSql, pageSql] = prepare.mock.calls.map(([sql]) => String(sql));
+    for (const sql of [countSql, pageSql]) {
+      expect(sql).toContain("LOWER(COALESCE(increment_id, CAST(magento_order_id AS TEXT))) LIKE LOWER(?) ESCAPE '\\'");
+      expect(sql).toContain("AND status = ?");
+    }
+    expect(countBind).toHaveBeenCalledWith("approved", expectedBinding);
+    expect(pageBind).toHaveBeenCalledWith("approved", expectedBinding, 25, 0);
+  });
+
+  it.each(["", "   ", "\t\n"])("treats blank order search %j as no search", async (search) => {
+    const { db, prepare, countBind, pageBind } = queueDb(0);
+    await listStaffCases(db, "all", 1, search);
+    const [countSql, pageSql] = prepare.mock.calls.map(([sql]) => String(sql));
+    expect(countSql).not.toContain("LIKE LOWER");
+    expect(pageSql).not.toContain("LIKE LOWER");
+    expect(countBind).toHaveBeenCalledWith();
+    expect(pageBind).toHaveBeenCalledWith(25, 0);
+  });
+
+  it("clamps against the searched result count", async () => {
+    const { db, pageBind } = queueDb(27);
+    const result = await listStaffCases(db, "open", 50, "  574  ");
+    expect(result).toMatchObject({ totalCount: 27, currentPage: 2, totalPages: 2 });
+    expect(pageBind).toHaveBeenCalledWith("%574%", 25, 25);
+  });
+
+  it("uses no status predicate for all cases", async () => {
+    const { db, prepare, countBind, pageBind } = queueDb(25);
+
+    await listStaffCases(db, "all");
+
+    const [countSql, pageSql] = prepare.mock.calls.map(([sql]) => String(sql));
+    expect(countSql).not.toContain("status NOT IN");
+    expect(countSql).not.toContain("status = ?");
+    expect(pageSql).not.toContain("status NOT IN");
+    expect(pageSql).not.toContain("status = ?");
+    expect(countBind).toHaveBeenCalledWith();
+    expect(pageBind).toHaveBeenCalledWith(25, 0);
+  });
+
+  it.each([0, -2, 1.5, Number.NaN])("defaults invalid requested page %s to page one", async (page) => {
+    const { db, pageBind } = queueDb(60);
+
+    const result = await listStaffCases(db, "open", page);
+
+    expect(result.currentPage).toBe(1);
+    expect(pageBind).toHaveBeenCalledWith(25, 0);
+  });
+
+  it("clamps an excessive page to the last available page", async () => {
+    const { db, pageBind } = queueDb(51);
+
+    const result = await listStaffCases(db, "open", 999);
+
+    expect(result).toMatchObject({ currentPage: 3, totalPages: 3 });
+    expect(pageBind).toHaveBeenCalledWith(25, 50);
+  });
+
+  it("keeps an empty queue on page one", async () => {
+    const { db, pageBind } = queueDb(0);
+
+    const result = await listStaffCases(db, "open", 9);
+
+    expect(result).toMatchObject({ totalCount: 0, currentPage: 1, totalPages: 1 });
+    expect(pageBind).toHaveBeenCalledWith(25, 0);
   });
 
   it("supports pending-review staff filtering", async () => {
-    const all = vi.fn().mockResolvedValue({ results: [] });
-    const bind = vi.fn(() => ({ all }));
-    const prepare = vi.fn(() => ({ bind }));
-    await listStaffCases({ prepare } as unknown as D1Database, "pending_review");
-    expect(bind).toHaveBeenCalledWith("pending_review");
+    const { db, countBind, pageBind } = queueDb(1);
+    await listStaffCases(db, "pending_review");
+    expect(countBind).toHaveBeenCalledWith("pending_review");
+    expect(pageBind).toHaveBeenCalledWith("pending_review", 25, 0);
   });
 
   it("allows unexpired pending-review tokens", async () => {
@@ -104,4 +199,11 @@ describe("verification persistence", () => {
     expect(bindings.flat()).toContain("request-1");
     expect(prepare).toHaveBeenCalledWith(expect.stringContaining("status = 'submitted'"));
   });
+});
+
+describe("staff order search parsing", () => {
+  it.each([[null, ""], ["", ""], ["   ", ""], ["  MH00555816  ", "MH00555816"]])(
+    "normalizes %j to %j",
+    (value, expected) => expect(parseStaffOrderSearch(value)).toBe(expected)
+  );
 });

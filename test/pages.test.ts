@@ -3,6 +3,63 @@ import { renderCustomerUploadPage, renderStaffCase, renderStaffList } from "../s
 import type { VerificationInformationRequest } from "../src/verification";
 
 describe("staff verification queue", () => {
+  it("renders middle-page controls with status-preserving compact links", async () => {
+    const body = await renderStaffList([], "awaiting_customer", {
+      totalCount: 201,
+      currentPage: 5,
+      totalPages: 9
+    }).text();
+
+    expect(body).toContain("Showing 101–125 of 201");
+    expect(body).toContain('/staff?status=awaiting_customer&amp;page=4">Previous');
+    expect(body).toContain('/staff?status=awaiting_customer&amp;page=6">Next');
+    expect(body).toContain('aria-current="page">5</span>');
+    expect(body).toContain('aria-hidden="true">…</span>');
+    expect(body).toContain('/staff?status=awaiting_customer&amp;page=9">9</a>');
+    expect(body).not.toContain('name="page"');
+    expect(body).toContain('type="submit">Apply</button>');
+  });
+
+  it("retains and escapes order search in the form and pagination links", async () => {
+    const body = await renderStaffList([], "all", {
+      totalCount: 30,
+      currentPage: 1,
+      totalPages: 2
+    }, ` MH%_\\&\"<> `).text();
+
+    expect(body).toContain('name="order" value=" MH%_\\&amp;&quot;&lt;&gt; "');
+    expect(body).toContain('/staff?status=all&amp;order=%20MH%25_%5C%26%22%3C%3E%20&amp;page=2');
+    expect(body).not.toContain('name="page"');
+    expect(body).toContain("No cases match that order number.");
+  });
+
+  it("uses the ordinary empty state when no search is active", async () => {
+    const body = await renderStaffList([], "open", { totalCount: 0, currentPage: 1, totalPages: 1 }).text();
+    expect(body).toContain("No cases need staff attention.");
+    expect(body).not.toContain("No cases match that order number.");
+  });
+
+  it("disables Previous on the first page and enables Next", async () => {
+    const body = await renderStaffList([], "open", { totalCount: 26, currentPage: 1, totalPages: 2 }).text();
+    expect(body).toContain('aria-disabled="true">Previous</span>');
+    expect(body).toContain('/staff?status=open&amp;page=2">Next</a>');
+  });
+
+  it("enables Previous and disables Next on the last page", async () => {
+    const body = await renderStaffList([], "all", { totalCount: 51, currentPage: 3, totalPages: 3 }).text();
+    expect(body).toContain('/staff?status=all&amp;page=2">Previous</a>');
+    expect(body).toContain('aria-disabled="true">Next</span>');
+  });
+
+  it.each([
+    [25, "Showing 1–25 of 25"],
+    [0, "Showing 0–0 of 0"]
+  ])("omits pagination for the %i-record boundary", async (totalCount, summary) => {
+    const body = await renderStaffList([], "open", { totalCount, currentPage: 1, totalPages: 1 }).text();
+    expect(body).toContain(summary);
+    expect(body).not.toContain('aria-label="Queue pages"');
+  });
+
   it("shows the shared initial requirements with the existing multi-file field", async () => {
     const response = renderCustomerUploadPage("000123", "token");
     const body = await response.text();
